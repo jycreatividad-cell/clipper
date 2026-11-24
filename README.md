@@ -35,10 +35,14 @@ Para más precisión: `set WHISPER_MODEL=medium` antes de iniciar (más lento).
 - **Fondo desenfocado**: el video completo al centro y el mismo video borroso detrás.
 - **Pantalla completa (recorte)**: llena la pantalla; mueve "posición" para enfocar a la persona
   que está hablando (izquierda / centro / derecha) y usa zoom si hace falta.
-- **Hook** arriba en cajas blancas (los emojis se quitan del video porque salen como cuadritos;
-  ponlos en el copy).
+- **Hook** con 10 estilos (TikTok clásico, Viral borde, Amarillo bomba, Última hora, Dos tonos,
+  Barra negra, Neón, Fuego, Cómic, Limpio), vista previa en vivo sobre el fotograma real,
+  posición arriba/centro/abajo y tamaño. Escribe `*entre asteriscos*` las palabras a resaltar
+  en color. Los emojis salen a color.
+
+  ![Estilos de hook](docs/estilos-hook.png)
 - **Marca de agua** con tu @.
-- Pon tu propia fuente guardándola como `fuente.ttf` en esta carpeta.
+- Para agregar estilos nuevos edita `STYLES` en `hooks.py` (fuentes en `fonts/`, licencia OFL).
 
 ## Ajustes (variables de entorno)
 | Variable | Por defecto | Qué hace |

@@ -60,6 +60,13 @@
   .job{font-size:13px;padding:6px 0;border-bottom:1px dashed var(--line)}
   .job:last-child{border:0}
   .hidden{display:none}
+  .styles{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+  .styles button{padding:0;border-radius:8px;overflow:hidden;position:relative;border:2px solid transparent;background:#000}
+  .styles button.sel{border-color:var(--yel)}
+  .styles img{width:100%;display:block;aspect-ratio:3/1;object-fit:contain;background:#2b2018}
+  .styles span{position:absolute;left:4px;top:4px;font-size:10px;background:#000c;padding:1px 6px;border-radius:4px}
+  .pv{display:flex;gap:10px;align-items:flex-end;margin-top:10px}
+  .pv img{width:180px;border-radius:10px;border:1px solid var(--line);background:#000}
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
@@ -132,8 +139,22 @@
       <p class="mut" id="durInfo" style="margin:0">Duración: —</p>
 
       <label class="f">Hook (texto arriba del video)</label>
-      <textarea id="hook" placeholder="Ej: SE ARMÓ EL LÍO EN LA CASA 😱"></textarea>
+      <textarea id="hook" placeholder="Ej: SE ARMÓ EL *LÍO* EN LA CASA 😱"></textarea>
+      <p class="mut" style="margin:4px 0">Pon *entre asteriscos* las palabras que quieres resaltar en color. Los emojis salen a color.</p>
       <div class="row" style="margin-top:6px;flex-wrap:wrap" id="hookIdeas"></div>
+
+      <label class="f">Estilo del hook</label>
+      <div class="styles" id="styles"></div>
+      <div class="row" style="margin-top:8px">
+        <div class="seg">
+          <label><input type="radio" name="hpos" value="arriba" checked><span>Arriba</span></label>
+          <label><input type="radio" name="hpos" value="centro"><span>Centro</span></label>
+          <label><input type="radio" name="hpos" value="abajo"><span>Abajo</span></label>
+        </div>
+      </div>
+      <label class="f">Tamaño del hook: <span id="hsizeV">100%</span></label>
+      <input type="range" id="hsize" min="60" max="140" value="100">
+      <div class="pv"><img id="hookPv" alt="Vista previa"><span class="mut">Vista previa con el fotograma actual</span></div>
 
       <label class="f">Formato</label>
       <div class="seg">
@@ -197,9 +218,44 @@ const fmtLong = s => { s = Math.floor(s); const h = Math.floor(s/3600), m = Math
 
 let state = {}, current = null, inT = 0, outT = 0, lastVid = null, seenFinals = new Set(), seenCaps = new Set(), firstLoad = true;
 
-const HOOKS = ['SE ARMÓ EL LÍO 😱','NADIE ESPERABA ESTO 👀','SE DIJERON DE TODO 🔥','MIREN LO QUE PASÓ EN LA CASA','ESTO SE SALIÓ DE CONTROL','LA REACCIÓN DE TODOS 😂'];
+const HOOKS = ['SE ARMÓ EL *LÍO* 😱','*NADIE* ESPERABA ESTO 👀','SE DIJERON DE *TODO* 🔥','MIREN LO QUE PASÓ EN *LA CASA*','ESTO SE SALIÓ DE *CONTROL*','LA *REACCIÓN* DE TODOS 😂'];
 $('#hookIdeas').innerHTML = HOOKS.map(h => `<button type="button" style="flex:0 0 auto;font-size:12px;padding:5px 8px">${h}</button>`).join('');
-$('#hookIdeas').onclick = e => { if (e.target.tagName === 'BUTTON') $('#hook').value = e.target.textContent; };
+$('#hookIdeas').onclick = e => { if (e.target.tagName === 'BUTTON') { $('#hook').value = e.target.textContent; updPreview(true); } };
+
+// ---- estilos de hook con vista previa
+let hookStyle = 'viral';
+try { hookStyle = localStorage.getItem('hookStyle') || 'viral'; } catch (e) {}
+const fmtSel = () => document.querySelector('[name=fmt]:checked').value;
+const hposSel = () => document.querySelector('[name=hpos]:checked').value;
+const pvUrl = (style, w, real) => '/api/hook-preview?' + new URLSearchParams({
+  text: $('#hook').value, style, w, format: fmtSel(), pos: real ? hposSel() : 'arriba', size: $('#hsize').value,
+  mode: document.querySelector('[name=mode]:checked').value, crop: real ? 0 : 1,
+  clip_id: real && current ? current.id : '', t: real ? (vid.currentTime || 0).toFixed(1) : 0});
+let styleList = [];
+fetch('/api/hook-styles').then(r => r.json()).then(l => { styleList = l; updPreview(true); });
+let pvTimer, pvAll = false;
+function updPreview(all) {
+  clearTimeout(pvTimer);
+  pvAll = pvAll || all;
+  pvTimer = setTimeout(() => {
+    all = pvAll; pvAll = false;
+    $('#hsizeV').textContent = $('#hsize').value + '%';
+    if (all || !$('#styles').children.length) {
+      $('#styles').innerHTML = styleList.map(s => `<button type="button" data-style="${s.id}" class="${s.id === hookStyle ? 'sel' : ''}">
+        <img src="${pvUrl(s.id, 320, false)}" loading="lazy"><span>${s.name}</span></button>`).join('');
+    }
+    if (current) $('#hookPv').src = pvUrl(hookStyle, 360, true);
+  }, 350);
+}
+$('#styles').onclick = e => {
+  const b = e.target.closest('[data-style]'); if (!b) return;
+  hookStyle = b.dataset.style; try { localStorage.setItem('hookStyle', hookStyle); } catch (e) {}
+  document.querySelectorAll('#styles button').forEach(x => x.classList.toggle('sel', x === b));
+  updPreview(false);
+};
+$('#hook').addEventListener('input', () => updPreview(true));
+$('#hsize').addEventListener('input', () => updPreview(false));
+document.querySelectorAll('[name=hpos]').forEach(e => e.addEventListener('change', () => updPreview(false)));
 
 const CAPTION = '🔥 Lo que pasó hoy en La Casa de Alofoke 3 😱 ¿De qué lado estás? 👇\n#LaCasaDeAlofoke3 #Alofoke #LaCasaDeAlofoke #RD #Dominicana #viral #parati #fyp';
 $('#caption').textContent = CAPTION;
@@ -238,7 +294,8 @@ function openClip(c) {
   $('#edEmpty').classList.add('hidden'); $('#edBody').classList.remove('hidden');
   vid.src = '/clips/' + c.file + '?t=' + c.created;
   inT = 0; outT = c.duration || 0; showMarks();
-  vid.onloadedmetadata = () => { if (!outT || outT > vid.duration) outT = vid.duration; showMarks(); };
+  vid.onloadedmetadata = () => { if (!outT || outT > vid.duration) outT = vid.duration; showMarks(); updPreview(false); };
+  vid.onseeked = vid.onpause = () => updPreview(false);
   renderLists();
 }
 function showMarks() {
@@ -257,8 +314,9 @@ const updOpts = () => {
   $('#vertOpts').classList.toggle('hidden', f === 'horizontal');
   const p = +$('#pos').value; $('#posV').textContent = p < 40 ? 'izquierda ' + p : p > 60 ? 'derecha ' + p : 'centro';
   $('#zoomV').textContent = $('#zoom').value + '%';
+  if (styleList.length) updPreview(true);
 };
-document.querySelectorAll('[name=fmt],#pos,#zoom').forEach(e => e.oninput = updOpts);
+document.querySelectorAll('[name=fmt],[name=mode],#pos,#zoom').forEach(e => e.oninput = updOpts);
 updOpts();
 
 $('#btnRender').onclick = async () => {
@@ -269,7 +327,7 @@ $('#btnRender').onclick = async () => {
     format: document.querySelector('[name=fmt]:checked').value,
     mode: document.querySelector('[name=mode]:checked').value,
     pos: +$('#pos').value, zoom: +$('#zoom').value,
-    hook: $('#hook').value, watermark: $('#wm').value, subs: $('#subs').checked
+    hook: $('#hook').value, hook_style: hookStyle, hook_pos: hposSel(), hook_size: +$('#hsize').value, watermark: $('#wm').value, subs: $('#subs').checked
   });
   refresh();
 };

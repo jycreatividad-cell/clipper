@@ -20,7 +20,6 @@ import re
 import shutil
 import subprocess
 import sys
-import textwrap
 import threading
 import time
 import uuid
@@ -28,6 +27,8 @@ import webbrowser
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
+
+import hooks
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("DATA_DIR", str(BASE))).resolve()  # en servidor: un volumen persistente
@@ -38,7 +39,7 @@ COOKIES = DATA / "cookies.txt"
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")  # obligatorio si la app está en internet
 YT_PROXY = os.environ.get("YT_PROXY", "")
 for d in (BUF, CLIPS, TMP):
-    d.mkdir(exist_ok=True)
+    d.mkdir(parents=True, exist_ok=True)
 
 SEG_SECONDS = 4
 BUFFER_MIN = int(os.environ.get("BUFFER_MIN", "30"))  # minutos que se guardan del directo
@@ -544,24 +545,18 @@ def job_render(jid, opts):
 
     font_opt = f"fontfile={fontfile}:" if fontfile else ""
 
-    # ---- hook (texto arriba, estilo TikTok: cajas blancas con texto negro)
+    # ---- hook (imagen PNG con el estilo elegido, ver hooks.py)
     hook = (opts.get("hook") or "").strip()
-    # los emojis salen como cuadritos en la mayoría de fuentes: se quitan del video
-    hook_txt = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]", "", hook).strip()
-    if hook_txt:
-        vertical = H > W
-        fs = int(W * 0.062) if vertical else int(H * 0.06)
-        width_chars = 22 if vertical else 40
-        lines = []
-        for para in hook_txt.splitlines():
-            lines += textwrap.wrap(para, width_chars) or [""]
-        y0 = int(H * 0.11) if vertical else int(H * 0.06)
-        for i, ln in enumerate(lines[:4]):
-            (work / f"hook{i}.txt").write_text(ln, encoding="utf-8")
-            y = y0 + i * int(fs * 1.45)
-            add(f"drawtext={font_opt}textfile=hook{i}.txt:fontsize={fs}:fontcolor=black:"
-                f"box=1:boxcolor=white@0.96:boxborderw={int(fs * 0.28)}:"
-                f"x=(w-text_w)/2:y={y}")
+    extra_inputs = []
+    if hook:
+        img = hooks.render_hook(hook, opts.get("hook_style") or hooks.DEFAULT_STYLE, W,
+                                scale=float(opts.get("hook_size", 100)) / 100 * (1 if H > W else 0.75))
+        if img:
+            img.save(work / "hook.png")
+            extra_inputs = ["-i", "hook.png"]
+            y = hook_y(opts.get("hook_pos", "arriba"), H, img.height)
+            chain.append(f"[{last}][1:v]overlay=0:{y}:eof_action=repeat[vh]")
+            last = "vh"
 
     # ---- marca de agua / @usuario
     wm = (opts.get("watermark") or "").strip()
@@ -586,7 +581,7 @@ def job_render(jid, opts):
 
     out = CLIPS / f"{rid}.mp4"
     filt = ";".join(chain)
-    cmd = ["-ss", f"{t_in:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
+    cmd = ["-ss", f"{t_in:.3f}", "-t", f"{dur:.3f}", "-i", str(src), *extra_inputs,
            "-filter_complex", filt, "-map", f"[{last}]", "-map", "0:a:0?",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
            "-r", "30", "-c:a", "aac", "-b:a", "160k", "-t", f"{dur:.3f}", "-movflags", "+faststart", str(out)]
@@ -594,8 +589,89 @@ def job_render(jid, opts):
     shutil.rmtree(work, ignore_errors=True)
     save_meta(rid, {"id": rid, "type": "final", "file": out.name, "created": time.time(),
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
-                    "label": hook[:60] or f"Clip {fmt} {dur:.0f}s"})
+                    "label": hook.replace("*", "")[:60] or f"Clip {fmt} {dur:.0f}s"})
     update_job(jid, result=rid)
+
+
+def hook_y(pos, H, h):
+    if pos == "centro":
+        return max(0, (H - h) // 2)
+    if pos == "abajo":
+        return max(0, int(H * 0.66) - h // 2)
+    return int(H * 0.08) if H > 1200 else int(H * 0.03)
+
+
+def preview_vf(fmt, mode, W, H):
+    if fmt == "horizontal":
+        return f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2"
+    if mode == "fill":
+        return f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
+    return (f"split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
+            f"boxblur=25:3,eq=brightness=-0.08[bg];[b]scale={W}:-2[fg];[bg][fg]overlay=0:(H-h)/2")
+
+
+_preview_bg = {}
+
+
+def preview_background(W, H):
+    """Fondo de ejemplo (o un fotograma real de la captura) para la vista previa del hook."""
+    from PIL import Image, ImageDraw
+    key = (W, H)
+    if key not in _preview_bg:
+        bg = Image.new("RGB", (W, H), "#1b1410")
+        d = ImageDraw.Draw(bg)
+        for i in range(H):
+            t = i / H
+            d.line([(0, i), (W, i)], fill=(int(60 + 60 * t), int(40 + 25 * t), int(30 + 10 * t)))
+        vh = W * 9 // 16
+        d.rectangle((0, (H - vh) // 2, W, (H + vh) // 2), fill="#2b2b33")
+        _preview_bg[key] = bg.convert("RGBA")
+    return _preview_bg[key].copy()
+
+
+@app.get("/api/hook-preview")
+def api_hook_preview():
+    from io import BytesIO
+    from flask import send_file
+    from PIL import Image
+    a = request.args
+    fmt = a.get("format", "vertical")
+    W, H = FORMATS.get(fmt, FORMATS["vertical"])
+    frame = None
+    cid = a.get("clip_id", "")
+    if re.fullmatch(r"[A-Za-z0-9_]+", cid) and meta_path(cid).exists():  # fotograma real
+        src = CLIPS / json.loads(meta_path(cid).read_text(encoding="utf-8"))["file"]
+        t = float(a.get("t", 0) or 0)
+        try:
+            raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", str(src),
+                                  "-frames:v", "1", "-vf", preview_vf(fmt, a.get("mode", "blur"), W, H),
+                                  "-f", "image2pipe", "-vcodec", "png", "-"],
+                                 capture_output=True, timeout=15).stdout
+            frame = Image.open(BytesIO(raw)).convert("RGBA")
+        except Exception:  # noqa: BLE001
+            frame = None
+    if frame is None:
+        frame = preview_background(W, H)
+    text = a.get("text", "").strip() or "ESCRIBE TU *HOOK* AQUÍ 🔥"
+    img = hooks.render_hook(text, a.get("style", hooks.DEFAULT_STYLE), W,
+                            scale=float(a.get("size", 100)) / 100 * (1 if H > W else 0.75))
+    if img:
+        y = hook_y(a.get("pos", "arriba"), H, img.height)
+        frame.alpha_composite(img, (0, y))
+        if a.get("crop") == "1":  # miniatura: solo la zona del hook
+            frame = frame.crop((0, max(0, y - 30), W, min(H, y + img.height + 30)))
+            H = frame.height
+    w = int(a.get("w", 360))
+    frame = frame.convert("RGB").resize((w, int(H * w / W)))
+    buf = BytesIO()
+    frame.save(buf, "JPEG", quality=82)
+    buf.seek(0)
+    return send_file(buf, mimetype="image/jpeg", max_age=0)
+
+
+@app.get("/api/hook-styles")
+def api_hook_styles():
+    return jsonify(hooks.style_list())
 
 
 # --------------------------------------------------------------------------- API
