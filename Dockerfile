@@ -21,7 +21,6 @@ ENV DATA_DIR=/data \
     WHISPER_MODEL=base \
     PYTHONUNBUFFERED=1
 RUN mkdir -p /data
-VOLUME /data
 EXPOSE 8080
 
 # 1 solo worker: la grabadora y los trabajos viven en memoria
