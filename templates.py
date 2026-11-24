@@ -158,7 +158,7 @@ def _vgrad(w, h, stops):
 # ---------------------------------------------------------------- render
 
 def render_template(text, cat_id, width=1080, height=1920, accent=None, badge=None, icon=None,
-                    panel=True, scale=1.0):
+                    panel=False, scale=1.0):
     c = CATS.get(cat_id, CATS["viral"])
     text = (text or "").strip() or c["sample"]
     accent = accent or c["accent"]
@@ -166,7 +166,7 @@ def render_template(text, cat_id, width=1080, height=1920, accent=None, badge=No
     icon = c.get("icon", "") if icon is None else icon.strip()
     deco = c.get("deco", [])
     bg = c.get("bg")
-    dark_text = bg == "paper"
+    dark_text = bg == "paper" and panel
 
     vertical = height > width
     pw = int(width * 0.92) if vertical else (int(width * 0.42) if width > height else int(width * 0.72))
@@ -269,6 +269,12 @@ def render_template(text, cat_id, width=1080, height=1920, accent=None, badge=No
         bw = bf.getlength(badge)
         bx0 = (width - bw) / 2 - fs * 0.32
         bx1 = (width + bw) / 2 + fs * 0.32
+        if not panel:  # sombra del encabezado
+            sh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            ImageDraw.Draw(sh).rounded_rectangle((bx0 + fs * 0.04, y + fs * 0.06, bx1 + fs * 0.04, y + badge_h + fs * 0.06),
+                                                 int(fs * 0.12), fill=(0, 0, 0, 170))
+            canvas.alpha_composite(sh.filter(ImageFilter.GaussianBlur(fs * 0.08)))
+            d = ImageDraw.Draw(canvas)
         d.rounded_rectangle((bx0, y, bx1, y + badge_h), int(fs * 0.12), fill=c["color"])
         d.text((width / 2, y + badge_h / 2), badge, font=bf, anchor="mm",
                fill=c.get("badge_text", "#FFFFFF"))
@@ -287,8 +293,10 @@ def render_template(text, cat_id, width=1080, height=1920, accent=None, badge=No
     T = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     td = ImageDraw.Draw(T)
     fill_col = "#141414" if dark_text else "#FFFFFF"
-    stroke = 0 if dark_text else max(3, int(fs * 0.07))
+    stroke = 0 if dark_text else max(3, int(fs * (0.07 if panel else 0.095)))
     acc_mode = c["accent_mode"]
+    if acc_mode == "marker" and not panel:
+        acc_mode = "box"   # sin papel detrás, la caja se lee más limpia
     box_text = "#111111" if _is_light(accent) else "#FFFFFF"
 
     layout = []
@@ -367,16 +375,21 @@ def render_template(text, cat_id, width=1080, height=1920, accent=None, badge=No
     if "sparks" in deco:
         _sparks(td, layout[0][1] - fs * 0.05, text_top + fs * 0.05, fs * 1.2, "#FFD60A")
 
-    # sombra del texto
-    if not dark_text:
-        sh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-        off = int(fs * 0.06)
-        sh.paste((0, 0, 0, 200), (off, off), T.split()[3])
-        canvas = Image.alpha_composite(canvas, sh.filter(ImageFilter.GaussianBlur(fs * 0.06)))
     for em, ex, ey in emojis:
         T.alpha_composite(em, (max(0, ex), max(0, ey)))
     center = (width / 2, (text_top + text_bottom) / 2)
     T = T.rotate(-c.get("rot", 0), resample=Image.BICUBIC, center=center)
+    # sombras (ya con la inclinación del texto)
+    if not dark_text:
+        alpha = T.split()[3]
+        if not panel:  # sin fondo: halo oscuro suave para leerse sobre cualquier video
+            halo = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            halo.paste((0, 0, 0, 150), (0, 0), alpha)
+            canvas = Image.alpha_composite(canvas, halo.filter(ImageFilter.GaussianBlur(fs * 0.28)))
+        sh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        off = int(fs * (0.06 if panel else 0.08))
+        sh.paste((0, 0, 0, 210 if panel else 235), (off, off), alpha)
+        canvas = Image.alpha_composite(canvas, sh.filter(ImageFilter.GaussianBlur(fs * 0.05)))
     canvas = Image.alpha_composite(canvas, T)
 
     # ---- iconos alrededor del texto

@@ -5,7 +5,7 @@ CapCut / Premiere / Canva, y la lámina comparativa.
 Uso:
   python generar_plantillas.py                         # las 15 con su texto de ejemplo
   python generar_plantillas.py --cat viral --texto "SE ARMÓ EL *LÍO* 😱" --color "#22D3EE" \
-         --encabezado "LA CASA DE ALOFOKE" --icono "🔥" --posicion arriba --sin-fondo
+         --encabezado "LA CASA DE ALOFOKE" --icono "🔥" --posicion arriba --con-fondo
 
 Salida en la carpeta plantillas/:
   lamina.png                    las 15 en cuadrícula
@@ -112,11 +112,11 @@ def main():
     ap.add_argument("--encabezado", help='texto del encabezado ("" para ocultarlo)')
     ap.add_argument("--icono", help='emoji principal ("" para ninguno)')
     ap.add_argument("--posicion", default="arriba", choices=["arriba", "centro", "abajo"])
-    ap.add_argument("--sin-fondo", action="store_true", help="sin panel oscuro detrás")
+    ap.add_argument("--con-fondo", action="store_true", help="con recuadro oscuro detrás (por defecto sin fondo)")
     ap.add_argument("--salida", default=str(OUT))
     a = ap.parse_args()
     out = Path(a.salida)
-    kw = {"accent": a.color, "badge": a.encabezado, "icon": a.icono, "panel": not a.sin_fondo}
+    kw = {"accent": a.color, "badge": a.encabezado, "icon": a.icono, "panel": a.con_fondo}
     if a.cat:
         folder = out / f"personalizada-{a.cat}"
         render_one(folder, a.cat, a.texto, a.posicion, **kw)
