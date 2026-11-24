@@ -261,11 +261,23 @@ function tplParams() {   // opciones editables de la plantilla elegida
   if (!$('#tplAccentAuto').checked) p.tpl_accent = $('#tplAccent').value;
   return p;
 }
-const pvUrl = (style, w, real) => '/api/hook-preview?' + new URLSearchParams({
-  text: $('#hook').value, style, w, format: fmtSel(), pos: real ? hposSel() : 'arriba', size: $('#hsize').value,
-  mode: document.querySelector('[name=mode]:checked').value, crop: real ? 0 : 1,
-  clip_id: real && current ? current.id : '', t: real ? (vid.currentTime || 0).toFixed(1) : 0,
-  ...(real || style === hookStyle ? tplParams() : {})});
+const pvUrl = (style, w, real) => '/api/hook-preview?' + new URLSearchParams(real ? {
+  text: $('#hook').value, style, w, format: fmtSel(), pos: hposSel(), size: $('#hsize').value,
+  mode: document.querySelector('[name=mode]:checked').value, crop: 0,
+  clip_id: current ? current.id : '', t: (vid.currentTime || 0).toFixed(1), ...tplParams()
+} : {style, w, format: fmtSel() === 'horizontal' ? 'horizontal' : 'vertical', crop: 1});
+// una sola vista previa a la vez: si llegan cambios mientras carga, solo se pide la última
+let pvBusy = false, pvNext = null;
+function loadMainPreview(url) {
+  if (pvBusy) { pvNext = url; return; }
+  pvBusy = true;
+  const im = new Image();
+  im.onload = () => { $('#hookPv').src = url; done(); };
+  im.onerror = done;
+  function done() { pvBusy = false; if (pvNext) { const u = pvNext; pvNext = null; loadMainPreview(u); } }
+  im.src = url;
+}
+let gridKey = '';
 let styleList = [];
 fetch('/api/hook-styles').then(r => r.json()).then(d => { styleData = d; syncTplFields(); updPreview(true); });
 function syncTplFields() {
@@ -284,12 +296,14 @@ function updPreview(all) {
     $('#hsizeV').textContent = $('#hsize').value + '%';
     styleList = groupSel() === 'templates' ? styleData.templates : styleData.simple;
     $('#styles').classList.toggle('tpl', groupSel() === 'templates');
-    if (all || !$('#styles').children.length) {
+    const key = groupSel() + '|' + (fmtSel() === 'horizontal');
+    if ((all && key !== gridKey) || !$('#styles').children.length) {
+      gridKey = key;
       $('#styles').innerHTML = styleList.map(s => `<button type="button" data-style="${s.id}" class="${s.id === hookStyle ? 'sel' : ''}">
         <img src="${pvUrl(s.id, 320, false)}" loading="lazy"><span>${s.name}</span></button>`).join('');
     }
-    if (current) $('#hookPv').src = pvUrl(hookStyle, 360, true);
-  }, 350);
+    if (current) loadMainPreview(pvUrl(hookStyle, 360, true));
+  }, 450);
 }
 $('#styles').onclick = e => {
   const b = e.target.closest('[data-style]'); if (!b) return;
@@ -302,7 +316,7 @@ document.querySelectorAll('[name=sgroup]').forEach(e => e.addEventListener('chan
 ['#tplBadge', '#tplIcon', '#tplAccent', '#tplAccentAuto', '#tplPanel', '#tplNoBadge'].forEach(id =>
   $(id).addEventListener('input', () => { if (id === '#tplAccent') $('#tplAccentAuto').checked = false; updPreview(false); }));
 $('#tplSample').onclick = () => { const t = tplInfo(hookStyle); if (t) { $('#hook').value = t.sample; updPreview(true); } };
-$('#hook').addEventListener('input', () => updPreview(true));
+$('#hook').addEventListener('input', () => updPreview(false));
 $('#hsize').addEventListener('input', () => updPreview(false));
 document.querySelectorAll('[name=hpos]').forEach(e => e.addEventListener('change', () => updPreview(false)));
 

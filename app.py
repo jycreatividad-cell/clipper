@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 import webbrowser
+from functools import lru_cache
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -606,7 +607,7 @@ def job_render(jid, opts):
         if img:
             img.save(work / "hook.png")
             extra_inputs = ["-i", "hook.png"]
-            y = hook_y(opts.get("hook_pos", "arriba"), H, img.height)
+            y = hook_y(opts.get("hook_pos", "arriba"), W, H, img.height)
             chain.append(f"[{last}][1:v]overlay=0:{y}:eof_action=repeat[vh]")
             last = "vh"
 
@@ -661,82 +662,95 @@ def hook_kwargs(o, style, W, H, prefix="hook_"):
     return kw
 
 
-def hook_y(pos, H, h):
+def hook_y(pos, W, H, h):
     if pos == "centro":
         return max(0, (H - h) // 2)
     if pos == "abajo":
         return max(0, int(H * 0.66) - h // 2)
-    return int(H * 0.08) if H > 1200 else int(H * 0.03)
+    return int(H * 0.08) if H > W else int(H * 0.03)
 
 
 def preview_vf(fmt, mode, W, H):
+    blur = max(2, int(25 * W / 1080))
     if fmt == "horizontal":
         return f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2"
     if mode == "fill":
         return f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
     return (f"split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
-            f"boxblur=25:3,eq=brightness=-0.08[bg];[b]scale={W}:-2[fg];[bg][fg]overlay=0:(H-h)/2")
+            f"boxblur={blur}:3,eq=brightness=-0.08[bg];[b]scale={W}:-2[fg];[bg][fg]overlay=0:(H-h)/2")
 
 
-_preview_bg = {}
-
-
+@lru_cache(maxsize=16)
 def preview_background(W, H):
-    """Fondo de ejemplo (o un fotograma real de la captura) para la vista previa del hook."""
+    """Fondo de ejemplo para la vista previa cuando no hay captura."""
     from PIL import Image, ImageDraw
-    key = (W, H)
-    if key not in _preview_bg:
-        bg = Image.new("RGB", (W, H), "#1b1410")
-        d = ImageDraw.Draw(bg)
-        for i in range(H):
-            t = i / H
-            d.line([(0, i), (W, i)], fill=(int(60 + 60 * t), int(40 + 25 * t), int(30 + 10 * t)))
-        vh = W * 9 // 16
-        d.rectangle((0, (H - vh) // 2, W, (H + vh) // 2), fill="#2b2b33")
-        _preview_bg[key] = bg.convert("RGBA")
-    return _preview_bg[key].copy()
+    bg = Image.new("RGB", (W, H), "#1b1410")
+    d = ImageDraw.Draw(bg)
+    for i in range(H):
+        t = i / H
+        d.line([(0, i), (W, i)], fill=(int(60 + 60 * t), int(40 + 25 * t), int(30 + 10 * t)))
+    vh = W * 9 // 16
+    d.rectangle((0, (H - vh) // 2, W, (H + vh) // 2), fill="#2b2b33")
+    return bg.convert("RGBA")
+
+
+@lru_cache(maxsize=48)
+def preview_frame(src, mtime, t, fmt, mode, W, H):
+    """Fotograma real ya encuadrado, guardado en memoria (no se repite ffmpeg en cada letra)."""
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", f"{t:.1f}", "-i", src,
+                          "-frames:v", "1", "-vf", preview_vf(fmt, mode, W, H),
+                          "-f", "image2pipe", "-vcodec", "png", "-"],
+                         capture_output=True, timeout=15).stdout
+    return raw or None
+
+
+@lru_cache(maxsize=256)
+def preview_jpeg(params):
+    """Dibuja la vista previa a tamaño chico directamente (rápido) y devuelve el JPEG."""
+    from io import BytesIO
+    from PIL import Image
+    a = dict(params)
+    fmt = a.get("format", "vertical")
+    W0, H0 = FORMATS.get(fmt, FORMATS["vertical"])
+    W = max(120, min(540, int(a.get("w", 360) or 360)))
+    H = int(H0 * W / W0)
+    frame = None
+    cid = a.get("clip_id", "")
+    if re.fullmatch(r"[A-Za-z0-9_]+", cid) and meta_path(cid).exists():
+        src = CLIPS / json.loads(meta_path(cid).read_text(encoding="utf-8"))["file"]
+        t = round(float(a.get("t", 0) or 0) * 2) / 2
+        try:
+            raw = preview_frame(str(src), src.stat().st_mtime, t, fmt, a.get("mode", "blur"), W, H)
+            frame = Image.open(BytesIO(raw)).convert("RGBA") if raw else None
+        except Exception:  # noqa: BLE001
+            frame = None
+    if frame is None:
+        frame = preview_background(W, H).copy()
+    style = a.get("style", hooks.DEFAULT_STYLE)
+    text = a.get("text", "").strip()
+    if not text and not style.startswith("t:"):
+        text = "ESCRIBE TU *HOOK* AQUÍ 🔥"   # las plantillas usan su propio texto de ejemplo
+    img = hooks.render_hook(text, style, W, **hook_kwargs(a, style, W, H, prefix=""))
+    if img:
+        y = hook_y(a.get("pos", "arriba"), W, H, img.height)
+        frame.alpha_composite(img, (0, y))
+        if a.get("crop") == "1":  # miniatura: solo la zona del hook
+            m = int(W * 0.03)
+            frame = frame.crop((0, max(0, y - m), W, min(H, y + img.height + m)))
+    buf = BytesIO()
+    frame.convert("RGB").save(buf, "JPEG", quality=85)
+    return buf.getvalue()
 
 
 @app.get("/api/hook-preview")
 def api_hook_preview():
-    from io import BytesIO
-    from flask import send_file
-    from PIL import Image
-    a = request.args
-    fmt = a.get("format", "vertical")
-    W, H = FORMATS.get(fmt, FORMATS["vertical"])
-    frame = None
-    cid = a.get("clip_id", "")
-    if re.fullmatch(r"[A-Za-z0-9_]+", cid) and meta_path(cid).exists():  # fotograma real
-        src = CLIPS / json.loads(meta_path(cid).read_text(encoding="utf-8"))["file"]
-        t = float(a.get("t", 0) or 0)
-        try:
-            raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", str(src),
-                                  "-frames:v", "1", "-vf", preview_vf(fmt, a.get("mode", "blur"), W, H),
-                                  "-f", "image2pipe", "-vcodec", "png", "-"],
-                                 capture_output=True, timeout=15).stdout
-            frame = Image.open(BytesIO(raw)).convert("RGBA")
-        except Exception:  # noqa: BLE001
-            frame = None
-    if frame is None:
-        frame = preview_background(W, H)
-    text = a.get("text", "").strip() or "ESCRIBE TU *HOOK* AQUÍ 🔥"
-    style = a.get("style", hooks.DEFAULT_STYLE)
-    if style.startswith("t:") and not a.get("text", "").strip():
-        text = ""  # la plantilla usa su texto de ejemplo
-    img = hooks.render_hook(text, style, W, **hook_kwargs(a, style, W, H, prefix=""))
-    if img:
-        y = hook_y(a.get("pos", "arriba"), H, img.height)
-        frame.alpha_composite(img, (0, y))
-        if a.get("crop") == "1":  # miniatura: solo la zona del hook
-            frame = frame.crop((0, max(0, y - 30), W, min(H, y + img.height + 30)))
-            H = frame.height
-    w = int(a.get("w", 360))
-    frame = frame.convert("RGB").resize((w, int(H * w / W)))
-    buf = BytesIO()
-    frame.save(buf, "JPEG", quality=82)
-    buf.seek(0)
-    return send_file(buf, mimetype="image/jpeg", max_age=0)
+    from flask import Response
+    params = tuple(sorted(request.args.items()))
+    data = preview_jpeg(params)
+    # las miniaturas (sin texto ni captura) no cambian: el navegador las guarda
+    static = request.args.get("crop") == "1" and not request.args.get("text")
+    return Response(data, mimetype="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=86400" if static else "no-store"})
 
 
 @app.get("/api/hook-styles")
