@@ -149,8 +149,12 @@ def _wrap(lines, font, size, max_w):
     return wrapped[:5]
 
 
-def render_hook(text, style_id=DEFAULT_STYLE, width=1080, scale=1.0):
-    """Devuelve una imagen RGBA de `width` px de ancho con el hook dibujado."""
+def render_hook(text, style_id=DEFAULT_STYLE, width=1080, scale=1.0, height=None, **tpl):
+    """Devuelve una imagen RGBA de `width` px de ancho con el hook dibujado.
+    Los ids "t:<categoría>" usan las plantillas PRO de templates.py (acepta accent, badge, icon, panel)."""
+    if style_id and style_id.startswith("t:"):
+        import templates
+        return templates.render_template(text, style_id[2:], width, height or 1920, scale=scale, **tpl)
     st = STYLES.get(style_id, STYLES[DEFAULT_STYLE])
     size = max(18, int(width * st["size"] * scale))
     font = _font(st["font"], size, st.get("weight"))

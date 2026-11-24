@@ -64,6 +64,9 @@
   .styles button{padding:0;border-radius:8px;overflow:hidden;position:relative;border:2px solid transparent;background:#000}
   .styles button.sel{border-color:var(--yel)}
   .styles img{width:100%;display:block;aspect-ratio:3/1;object-fit:contain;background:#2b2018}
+  .styles.tpl{grid-template-columns:repeat(3,1fr)}
+  .styles.tpl img{aspect-ratio:4/5;background:#0b0b12;padding:4px}
+  .tplbox{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;background:#121217}
   .styles span{position:absolute;left:4px;top:4px;font-size:10px;background:#000c;padding:1px 6px;border-radius:4px}
   .pv{display:flex;gap:10px;align-items:flex-end;margin-top:10px}
   .pv img{width:180px;border-radius:10px;border:1px solid var(--line);background:#000}
@@ -144,7 +147,25 @@
       <div class="row" style="margin-top:6px;flex-wrap:wrap" id="hookIdeas"></div>
 
       <label class="f">Estilo del hook</label>
+      <div class="seg" style="margin-bottom:8px">
+        <label><input type="radio" name="sgroup" value="templates" checked><span>⭐ Plantillas PRO (15)</span></label>
+        <label><input type="radio" name="sgroup" value="simple"><span>Estilos simples (10)</span></label>
+      </div>
       <div class="styles" id="styles"></div>
+      <div id="tplOpts" class="tplbox hidden">
+        <div class="row">
+          <div><label class="f">Encabezado</label><input type="text" id="tplBadge" placeholder=""></div>
+          <div><label class="f">Icono / emoji</label><input type="text" id="tplIcon" placeholder=""></div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label class="mut" style="display:flex;gap:6px;align-items:center">Color de resaltado
+            <input type="color" id="tplAccent" value="#FFE600" style="width:44px;height:30px;border:0;background:none">
+            <input type="checkbox" id="tplAccentAuto" checked> automático</label>
+          <label class="mut" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="tplPanel" checked> Fondo del panel</label>
+          <label class="mut" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="tplNoBadge"> Sin encabezado</label>
+        </div>
+        <button type="button" id="tplSample" style="margin-top:8px;font-size:13px">Usar texto de ejemplo de esta plantilla</button>
+      </div>
       <div class="row" style="margin-top:8px">
         <div class="seg">
           <label><input type="radio" name="hpos" value="arriba" checked><span>Arriba</span></label>
@@ -222,17 +243,38 @@ const HOOKS = ['SE ARMÓ EL *LÍO* 😱','*NADIE* ESPERABA ESTO 👀','SE DIJERO
 $('#hookIdeas').innerHTML = HOOKS.map(h => `<button type="button" style="flex:0 0 auto;font-size:12px;padding:5px 8px">${h}</button>`).join('');
 $('#hookIdeas').onclick = e => { if (e.target.tagName === 'BUTTON') { $('#hook').value = e.target.textContent; updPreview(true); } };
 
-// ---- estilos de hook con vista previa
-let hookStyle = 'viral';
-try { hookStyle = localStorage.getItem('hookStyle') || 'viral'; } catch (e) {}
+// ---- estilos de hook con vista previa (plantillas PRO + estilos simples)
+let hookStyle = 't:viral';
+try { hookStyle = localStorage.getItem('hookStyle') || 't:viral'; } catch (e) {}
 const fmtSel = () => document.querySelector('[name=fmt]:checked').value;
 const hposSel = () => document.querySelector('[name=hpos]:checked').value;
+const groupSel = () => document.querySelector('[name=sgroup]:checked').value;
+if (!hookStyle.startsWith('t:')) document.querySelector('[name=sgroup][value=simple]').checked = true;
+let styleData = {simple: [], templates: []};
+const tplInfo = id => styleData.templates.find(t => t.id === id);
+function tplParams() {   // opciones editables de la plantilla elegida
+  if (!hookStyle.startsWith('t:')) return {};
+  const p = {tpl_panel: $('#tplPanel').checked ? 1 : 0};
+  if ($('#tplNoBadge').checked) p.tpl_badge = '';
+  else if ($('#tplBadge').value.trim()) p.tpl_badge = $('#tplBadge').value.trim();
+  if ($('#tplIcon').value.trim()) p.tpl_icon = $('#tplIcon').value.trim() === '-' ? '' : $('#tplIcon').value.trim();
+  if (!$('#tplAccentAuto').checked) p.tpl_accent = $('#tplAccent').value;
+  return p;
+}
 const pvUrl = (style, w, real) => '/api/hook-preview?' + new URLSearchParams({
   text: $('#hook').value, style, w, format: fmtSel(), pos: real ? hposSel() : 'arriba', size: $('#hsize').value,
   mode: document.querySelector('[name=mode]:checked').value, crop: real ? 0 : 1,
-  clip_id: real && current ? current.id : '', t: real ? (vid.currentTime || 0).toFixed(1) : 0});
+  clip_id: real && current ? current.id : '', t: real ? (vid.currentTime || 0).toFixed(1) : 0,
+  ...(real || style === hookStyle ? tplParams() : {})});
 let styleList = [];
-fetch('/api/hook-styles').then(r => r.json()).then(l => { styleList = l; updPreview(true); });
+fetch('/api/hook-styles').then(r => r.json()).then(d => { styleData = d; syncTplFields(); updPreview(true); });
+function syncTplFields() {
+  const t = tplInfo(hookStyle);
+  $('#tplOpts').classList.toggle('hidden', !t);
+  if (!t) return;
+  $('#tplBadge').placeholder = t.badge; $('#tplIcon').placeholder = (t.icon || 'sin icono') + '  (- = ninguno)';
+  if ($('#tplAccentAuto').checked) $('#tplAccent').value = t.accent;
+}
 let pvTimer, pvAll = false;
 function updPreview(all) {
   clearTimeout(pvTimer);
@@ -240,6 +282,8 @@ function updPreview(all) {
   pvTimer = setTimeout(() => {
     all = pvAll; pvAll = false;
     $('#hsizeV').textContent = $('#hsize').value + '%';
+    styleList = groupSel() === 'templates' ? styleData.templates : styleData.simple;
+    $('#styles').classList.toggle('tpl', groupSel() === 'templates');
     if (all || !$('#styles').children.length) {
       $('#styles').innerHTML = styleList.map(s => `<button type="button" data-style="${s.id}" class="${s.id === hookStyle ? 'sel' : ''}">
         <img src="${pvUrl(s.id, 320, false)}" loading="lazy"><span>${s.name}</span></button>`).join('');
@@ -251,8 +295,13 @@ $('#styles').onclick = e => {
   const b = e.target.closest('[data-style]'); if (!b) return;
   hookStyle = b.dataset.style; try { localStorage.setItem('hookStyle', hookStyle); } catch (e) {}
   document.querySelectorAll('#styles button').forEach(x => x.classList.toggle('sel', x === b));
-  updPreview(false);
+  $('#tplBadge').value = ''; $('#tplIcon').value = ''; $('#tplAccentAuto').checked = true; $('#tplNoBadge').checked = false;
+  syncTplFields(); updPreview(false);
 };
+document.querySelectorAll('[name=sgroup]').forEach(e => e.addEventListener('change', () => updPreview(true)));
+['#tplBadge', '#tplIcon', '#tplAccent', '#tplAccentAuto', '#tplPanel', '#tplNoBadge'].forEach(id =>
+  $(id).addEventListener('input', () => { if (id === '#tplAccent') $('#tplAccentAuto').checked = false; updPreview(false); }));
+$('#tplSample').onclick = () => { const t = tplInfo(hookStyle); if (t) { $('#hook').value = t.sample; updPreview(true); } };
 $('#hook').addEventListener('input', () => updPreview(true));
 $('#hsize').addEventListener('input', () => updPreview(false));
 document.querySelectorAll('[name=hpos]').forEach(e => e.addEventListener('change', () => updPreview(false)));
@@ -314,7 +363,7 @@ const updOpts = () => {
   $('#vertOpts').classList.toggle('hidden', f === 'horizontal');
   const p = +$('#pos').value; $('#posV').textContent = p < 40 ? 'izquierda ' + p : p > 60 ? 'derecha ' + p : 'centro';
   $('#zoomV').textContent = $('#zoom').value + '%';
-  if (styleList.length) updPreview(true);
+  if (styleData.templates.length) updPreview(true);
 };
 document.querySelectorAll('[name=fmt],[name=mode],#pos,#zoom').forEach(e => e.oninput = updOpts);
 updOpts();
@@ -327,7 +376,7 @@ $('#btnRender').onclick = async () => {
     format: document.querySelector('[name=fmt]:checked').value,
     mode: document.querySelector('[name=mode]:checked').value,
     pos: +$('#pos').value, zoom: +$('#zoom').value,
-    hook: $('#hook').value, hook_style: hookStyle, hook_pos: hposSel(), hook_size: +$('#hsize').value, watermark: $('#wm').value, subs: $('#subs').checked
+    hook: $('#hook').value, hook_style: hookStyle, hook_pos: hposSel(), hook_size: +$('#hsize').value, ...tplParams(), watermark: $('#wm').value, subs: $('#subs').checked
   });
   refresh();
 };

@@ -11,7 +11,7 @@ ARG SUBTITULOS=1
 RUN pip install --no-cache-dir -r requirements.txt gunicorn \
  && if [ "$SUBTITULOS" = "1" ]; then pip install --no-cache-dir -r requirements-subtitulos.txt; fi
 
-COPY app.py hooks.py ./
+COPY app.py hooks.py templates.py ./
 COPY fonts ./fonts
 COPY static ./static
 

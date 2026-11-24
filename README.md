@@ -31,6 +31,25 @@ pip install -r requirements-subtitulos.txt
 Salen palabra por palabra, en mayúsculas, con la palabra que se está diciendo en amarillo.
 Para más precisión: `set WHISPER_MODEL=medium` antes de iniciar (más lento).
 
+## ⭐ Plantillas PRO de hooks (15 categorías)
+
+![Lámina de plantillas](plantillas/lamina.png)
+
+Polémica · Curiosidad · Noticias RD · Debate · Viral · Actualidad RD · Humor/Sarcasmo · Impacto ·
+Verdad incómoda · Motivacional · Revelación · Alerta · Reflexión · Tendencia · Local/Cotidiano.
+
+**En la app** (pestaña "⭐ Plantillas PRO"), cada plantilla deja cambiar: texto del hook,
+palabra resaltada (`*así*`), color de resaltado, encabezado (o quitarlo), icono/emoji
+(`-` = ninguno), fondo del panel, posición y tamaño. Funciona en 9:16, 1:1 y 16:9.
+
+**Fuera de la app** (CapCut, Premiere, Canva): en `plantillas/NN-categoria/` hay PNG
+transparentes listos para poner encima del video (`vertical.png` 1080×1920, `cuadrado.png`
+1080×1080, `horizontal.png` 1920×1080 y `hook.png` recortado). Para crear uno con tu texto:
+```
+python generar_plantillas.py --cat viral --texto "SE ARMÓ EL *LÍO* 😱" --encabezado "LA CASA DE ALOFOKE" --color "#22D3EE"
+```
+Para crear categorías nuevas o cambiar colores/iconos por defecto, edita `CATS` en `templates.py`.
+
 ## Opciones del editor
 - **Fondo desenfocado**: el video completo al centro y el mismo video borroso detrás.
 - **Pantalla completa (recorte)**: llena la pantalla; mueve "posición" para enfocar a la persona

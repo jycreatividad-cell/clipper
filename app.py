@@ -550,7 +550,7 @@ def job_render(jid, opts):
     extra_inputs = []
     if hook:
         img = hooks.render_hook(hook, opts.get("hook_style") or hooks.DEFAULT_STYLE, W,
-                                scale=float(opts.get("hook_size", 100)) / 100 * (1 if H > W else 0.75))
+                                **hook_kwargs(opts, opts.get("hook_style") or "", W, H))
         if img:
             img.save(work / "hook.png")
             extra_inputs = ["-i", "hook.png"]
@@ -591,6 +591,22 @@ def job_render(jid, opts):
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
                     "label": hook.replace("*", "")[:60] or f"Clip {fmt} {dur:.0f}s"})
     update_job(jid, result=rid)
+
+
+def hook_kwargs(o, style, W, H, prefix="hook_"):
+    """parámetros de tamaño y de plantilla, desde el JSON del render o la URL de la vista previa."""
+    size = float(o.get(prefix + "size", o.get("size", 100)) or 100) / 100
+    kw = {"scale": size * (1 if (H > W or style.startswith("t:")) else 0.75), "height": H}
+    if style.startswith("t:"):
+        for k in ("accent", "badge", "icon"):
+            v = o.get("tpl_" + k)
+            if v is not None and v != "__default__":
+                kw[k] = str(v)
+        if "tpl_panel" in o:
+            kw["panel"] = str(o.get("tpl_panel")).lower() not in ("0", "false", "no")
+        if kw.get("accent") and not re.fullmatch(r"#[0-9A-Fa-f]{6}", kw["accent"]):
+            kw.pop("accent")
+    return kw
 
 
 def hook_y(pos, H, h):
@@ -653,8 +669,10 @@ def api_hook_preview():
     if frame is None:
         frame = preview_background(W, H)
     text = a.get("text", "").strip() or "ESCRIBE TU *HOOK* AQUÍ 🔥"
-    img = hooks.render_hook(text, a.get("style", hooks.DEFAULT_STYLE), W,
-                            scale=float(a.get("size", 100)) / 100 * (1 if H > W else 0.75))
+    style = a.get("style", hooks.DEFAULT_STYLE)
+    if style.startswith("t:") and not a.get("text", "").strip():
+        text = ""  # la plantilla usa su texto de ejemplo
+    img = hooks.render_hook(text, style, W, **hook_kwargs(a, style, W, H, prefix=""))
     if img:
         y = hook_y(a.get("pos", "arriba"), H, img.height)
         frame.alpha_composite(img, (0, y))
@@ -671,7 +689,8 @@ def api_hook_preview():
 
 @app.get("/api/hook-styles")
 def api_hook_styles():
-    return jsonify(hooks.style_list())
+    import templates
+    return jsonify(simple=hooks.style_list(), templates=templates.template_list())
 
 
 # --------------------------------------------------------------------------- API
