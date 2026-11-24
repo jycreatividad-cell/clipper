@@ -25,4 +25,6 @@ RUN mkdir -p /data
 EXPOSE 8080
 
 # 1 solo worker: la grabadora y los trabajos viven en memoria
-CMD gunicorn -w 1 -k gthread --threads 16 --timeout 0 -b 0.0.0.0:${PORT} app:app
+# YouTube cambia seguido: se actualiza yt-dlp en cada arranque
+CMD pip install -q -U "yt-dlp[default]" || true; deno --version | head -1; \
+    gunicorn -w 1 -k gthread --threads 16 --timeout 0 -b 0.0.0.0:${PORT} app:app

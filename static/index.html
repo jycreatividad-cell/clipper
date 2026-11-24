@@ -423,7 +423,8 @@ async function refresh() {
     ? `<span class="dot on"></span>Grabando · buffer ${fmtLong(r.buffer)} / ${fmtLong(r.max)}`
     : `<span class="dot"></span>Sin grabar${r.buffer ? ' · buffer guardado ' + fmtLong(r.buffer) : ''}`;
   $('#bufBar').style.width = Math.min(100, r.buffer / r.max * 100) + '%';
-  $('#recErr').classList.toggle('hidden', !r.error); $('#recErr').textContent = r.error || '';
+  const warn = state.js_runtime ? '' : '⚠ Falta Deno (motor de JavaScript): sin él YouTube no entrega el video. Windows: winget install DenoLand.Deno y reinicia la app.\n\n';
+  $('#recErr').classList.toggle('hidden', !r.error && !warn); $('#recErr').textContent = warn + (r.error || '');
   document.querySelectorAll('[data-cap]').forEach(b => b.disabled = !r.buffer);
   if (r.video_id && r.video_id !== lastVid) {
     lastVid = r.video_id;

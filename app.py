@@ -46,6 +46,8 @@ BUFFER_MIN = int(os.environ.get("BUFFER_MIN", "30"))  # minutos que se guardan d
 PORT = int(os.environ.get("PORT", "5055"))
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
 QUALITY = os.environ.get("CALIDAD", "1080")  # altura máxima a grabar
+# primero formatos ya mezclados (HLS del directo); si no hay, video+audio por separado; si no, lo que haya
+LIVE_FORMAT = (f"b[height<={QUALITY}]/bv*[height<={QUALITY}]+ba/b/bv*+ba/best")
 
 app = Flask(__name__, static_folder=str(BASE / "static"))
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
@@ -95,8 +97,18 @@ jobs_lock = threading.Lock()
 
 # --------------------------------------------------------------------------- utilidades
 
+def js_runtime_args():
+    """yt-dlp necesita un motor de JavaScript para YouTube (Deno por defecto; si no, Node o Bun)."""
+    if shutil.which("deno"):
+        return []
+    for rt in ("node", "bun", "quickjs"):
+        if shutil.which(rt):
+            return ["--js-runtimes", rt]
+    return []
+
+
 def ytdlp():
-    cmd = [sys.executable, "-m", "yt_dlp"]
+    cmd = [sys.executable, "-m", "yt_dlp", *js_runtime_args()]
     if COOKIES.exists():
         cmd += ["--cookies", str(COOKIES)]
     if YT_PROXY:
@@ -212,6 +224,46 @@ def find_font():
 
 # --------------------------------------------------------------------------- grabadora en vivo
 
+def diagnose(url):
+    """Explica en español por qué yt-dlp no consigue el video."""
+    lines = []
+    try:
+        ver = subprocess.run([sys.executable, "-m", "yt_dlp", "--version"], capture_output=True,
+                             text=True, timeout=20).stdout.strip()
+    except Exception:  # noqa: BLE001
+        ver = "?"
+    js = "deno" if shutil.which("deno") else next((r for r in ("node", "bun", "quickjs") if shutil.which(r)), None)
+    lines.append(f"yt-dlp {ver} · motor JS: {js or 'NINGUNO'} · cookies: {'sí' if COOKIES.exists() else 'no'}")
+    try:
+        p = subprocess.run(ytdlp() + ["-F", "--no-warnings", url], capture_output=True, text=True, timeout=90)
+        out = (p.stdout or "") + (p.stderr or "")
+    except Exception as e:  # noqa: BLE001
+        out = str(e)
+    low = out.lower()
+    has_video = any(t in out for t in (" mp4 ", " webm ", " ts ")) or "m3u8" in low
+    if "not a bot" in low or "sign in to confirm" in low or "429" in low:
+        lines.append("→ YouTube está bloqueando al servidor (\"confirma que no eres un bot\"). "
+                     "Sube un cookies.txt nuevo en 🍪 Cookies de YouTube (exportado de una cuenta "
+                     "secundaria con la sesión abierta) o usa un proxy (YT_PROXY).")
+    elif "not currently live" in low or "will begin" in low or "premieres in" in low or "offline" in low:
+        lines.append("→ El directo no está en vivo ahora mismo. Para repeticiones usa "
+                     "\"Capturar de un video ya subido\".")
+    elif "unable to connect" in low or "timed out" in low or "name resolution" in low or "proxyerror" in low:
+        lines.append("→ El servidor no pudo conectarse a YouTube (red o proxy). Revisa YT_PROXY o la conexión.")
+    elif "private video" in low or "members-only" in low or "video unavailable" in low:
+        lines.append("→ El video es privado, solo para miembros o no está disponible.")
+    elif not has_video:
+        if not js:
+            lines.append("→ Falta un motor de JavaScript: YouTube solo entrega imágenes sin él. "
+                         "Instala Deno (Windows: winget install DenoLand.Deno) y reinicia la app.")
+        else:
+            lines.append("→ YouTube solo entregó imágenes, sin video. Casi siempre se arregla "
+                         "actualizando yt-dlp (pip install -U \"yt-dlp[default]\") y subiendo cookies nuevas.")
+    else:
+        lines.append("→ Hay formatos disponibles pero la descarga falló. Actualiza yt-dlp y prueba de nuevo.")
+    return "\n".join(lines)
+
+
 class Recorder:
     def __init__(self):
         self.url = None
@@ -272,7 +324,7 @@ class Recorder:
                 self.procs = [ff]
             else:
                 yt = subprocess.Popen(
-                    ytdlp() + ["-f", f"b[height<={QUALITY}]/b", "--no-part", "--quiet",
+                    ytdlp() + ["-f", LIVE_FORMAT, "--no-part", "--quiet",
                                "--no-warnings", "-o", "-", self.url],
                     stdout=subprocess.PIPE, stderr=log)
                 ff = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -286,9 +338,9 @@ class Recorder:
                 break
             # el directo se cortó o el link expiró: reintentar
             fails = fails + 1 if time.time() - t0 < 30 else 0
-            if fails >= 5:
-                self.error = ("No se pudo grabar el directo. ¿Está en vivo? Revisa "
-                              "buffer/grabadora.log. Últimas líneas:\n" + self.tail_log())
+            if fails >= 4:
+                self.error = ("No se pudo grabar el directo.\n" + diagnose(self.url) +
+                              "\n\nÚltimas líneas de buffer/grabadora.log:\n" + self.tail_log(4))
                 self.running = False
                 break
             time.sleep(3)
@@ -396,7 +448,7 @@ def job_capture_buffer(jid, seconds):
 def job_capture_vod(jid, url, start, end):
     cid = "cap_" + time.strftime("%H%M%S") + "_" + jid[:4]
     out_tpl = str(CLIPS / f"{cid}.%(ext)s")
-    cmd = ytdlp() + ["-f", f"bv*[height<={QUALITY}]+ba/b[height<={QUALITY}]/b",
+    cmd = ytdlp() + ["-f", f"bv*[height<={QUALITY}]+ba/b[height<={QUALITY}]/bv*+ba/b/best",
                      "--download-sections", f"*{start}-{end}",
                      "--merge-output-format", "mp4", "--no-playlist",
                      "--quiet", "--no-warnings", "-o", out_tpl, url]
@@ -776,7 +828,8 @@ def api_status():
                   "buffer": rec.buffer_seconds(), "max": BUFFER_MIN * 60,
                   "video_id": youtube_id(rec.url)},
         jobs=js, clips=clips, subs_available=_has_whisper(), font=find_font()[1],
-        cookies=COOKIES.exists())
+        cookies=COOKIES.exists(),
+        js_runtime=bool(shutil.which("deno") or any(shutil.which(r) for r in ("node", "bun", "quickjs"))))
 
 
 def _has_whisper():
