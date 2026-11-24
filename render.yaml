@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: clipper-en-vivo
+    runtime: docker
+    plan: standard        # 2 GB RAM: necesario para subtítulos; "starter" sirve sin subtítulos
+    healthCheckPath: /healthz
+    envVars:
+      - key: APP_PASSWORD
+        generateValue: true
+      - key: BUFFER_MIN
+        value: "30"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 10

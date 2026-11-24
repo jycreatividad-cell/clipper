@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipper en Vivo</title>
+<style>
+  :root{--bg:#0d0d10;--card:#17171c;--line:#2a2a33;--txt:#f2f2f5;--mut:#9a9aa8;--acc:#ff2e63;--ok:#22c55e;--yel:#ffd60a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+  header h1{font-size:18px;margin:0}
+  header .tag{background:var(--acc);color:#fff;font-weight:700;font-size:12px;padding:3px 8px;border-radius:6px}
+  main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;padding:16px 20px;max-width:1500px;margin:auto}
+  @media(max-width:980px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+  .card h2{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 12px}
+  input[type=text],textarea,select{width:100%;background:#0f0f13;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 12px;font:inherit}
+  textarea{resize:vertical;min-height:62px}
+  button{background:#26262e;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{border-color:#555}
+  button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+  button.big{font-size:17px;padding:14px 10px}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row>*{flex:1}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .mut{color:var(--mut);font-size:13px}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#555;margin-right:6px}
+  .dot.on{background:var(--acc);animation:p 1.2s infinite}
+  @keyframes p{50%{opacity:.3}}
+  .player{aspect-ratio:16/9;background:#000;border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--mut)}
+  .player iframe{width:100%;height:100%;border:0}
+  .bar{height:6px;background:#26262e;border-radius:4px;overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;background:var(--acc);width:0}
+  .err{background:#3a1018;border:1px solid #7a1f33;color:#ffb3c1;padding:10px;border-radius:10px;white-space:pre-wrap;font-size:13px;margin-top:10px}
+  .list{display:flex;flex-direction:column;gap:8px}
+  .item{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#121217}
+  .item.sel{border-color:var(--acc)}
+  .item .t{flex:1;min-width:0}
+  .item .t b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item button{padding:6px 10px;font-size:13px}
+  .finals{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .final{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#121217}
+  .final video{width:100%;display:block;background:#000;max-height:280px}
+  .final .a{display:flex;gap:4px;padding:6px}
+  .final .a>*{flex:1;padding:6px;font-size:12px;text-align:center;text-decoration:none}
+  a.btn{background:#26262e;border:1px solid var(--line);color:var(--txt);border-radius:8px;font-weight:600}
+  #editor video{width:100%;max-height:360px;background:#000;border-radius:10px}
+  .marks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+  .mk{background:#0f0f13;border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}
+  .mk b{font-size:20px;font-variant-numeric:tabular-nums}
+  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg label{flex:1;text-align:center;padding:8px;cursor:pointer;font-weight:600;font-size:13px}
+  .seg input{display:none}
+  .seg input:checked+span{color:var(--yel)}
+  label.f{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+  input[type=range]{width:100%}
+  kbd{background:#26262e;border:1px solid #444;border-bottom-width:2px;border-radius:4px;padding:0 5px;font-size:11px}
+  .job{font-size:13px;padding:6px 0;border-bottom:1px dashed var(--line)}
+  .job:last-child{border:0}
+  .hidden{display:none}
+  .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>✂️ Clipper en Vivo</h1><span class="tag">LA CASA DE ALOFOKE 3</span>
+  <span class="mut" style="margin-left:auto">Atajos: <kbd>1</kbd> 30s · <kbd>2</kbd> 1m · <kbd>3</kbd> 2m · <kbd>4</kbd> 5m · <kbd>I</kbd>/<kbd>O</kbd> entrada/salida</span>
+</header>
+
+<main>
+<section>
+  <div class="card">
+    <h2>1 · Directo</h2>
+    <div class="row">
+      <input id="url" type="text" placeholder="Link del directo de YouTube (ej. https://www.youtube.com/watch?v=… o https://www.youtube.com/@canal/live)">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="pri" id="btnStart">● Iniciar grabación</button>
+      <button id="btnStop">■ Detener</button>
+    </div>
+    <p class="mut" id="recState" style="margin:10px 0 0"><span class="dot"></span>Sin grabar</p>
+    <div class="bar"><i id="bufBar"></i></div>
+    <div id="recErr" class="err hidden"></div>
+    <details style="margin-top:10px">
+      <summary class="mut" style="cursor:pointer">🍪 Cookies de YouTube <span id="ckState"></span> — necesarias si YouTube pide "confirmar que no eres un bot"</summary>
+      <p class="mut">Exporta <b>cookies.txt</b> de youtube.com con la extensión "Get cookies.txt LOCALLY" (Chrome/Firefox), usando una cuenta secundaria, y súbelo aquí.</p>
+      <div class="row"><input type="file" id="ckFile" accept=".txt"><button id="ckUp">Subir</button><button id="ckDel">Quitar</button></div>
+    </details>
+    <div class="player" id="player" style="margin-top:12px">El directo aparecerá aquí</div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Capturar lo que acaba de pasar</h2>
+    <div class="grid4">
+      <button class="big pri" data-cap="30">30 s</button>
+      <button class="big pri" data-cap="60">1 min</button>
+      <button class="big pri" data-cap="120">2 min</button>
+      <button class="big pri" data-cap="300">5 min</button>
+    </div>
+    <p class="mut">Captura del buffer grabado (siempre un poco más de lo necesario; luego recortas exacto en el editor).</p>
+    <details>
+      <summary class="mut" style="cursor:pointer">Capturar de un video ya subido / repetición (por tiempo)</summary>
+      <div class="row" style="margin-top:8px">
+        <input id="vodUrl" type="text" placeholder="Link del video (vacío = el mismo del directo)">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="vodStart" type="text" placeholder="Desde (1:02:10)">
+        <input id="vodEnd" type="text" placeholder="Hasta (1:03:40)">
+        <button id="btnVod">Descargar tramo</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Capturas</h2>
+    <div class="list" id="caps"><p class="mut">Todavía no hay capturas.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="card" id="editor">
+    <h2>3 · Editor</h2>
+    <div id="edEmpty" class="mut">Elige una captura para editarla.</div>
+    <div id="edBody" class="hidden">
+      <video id="edVideo" controls playsinline></video>
+      <div class="marks">
+        <div class="mk"><div class="mut">Entrada</div><b id="inT">0:00.0</b><div class="row" style="margin-top:6px"><button id="btnIn">Marcar <kbd>I</kbd></button><button id="goIn">Ir</button></div></div>
+        <div class="mk"><div class="mut">Salida</div><b id="outT">0:00.0</b><div class="row" style="margin-top:6px"><button id="btnOut">Marcar <kbd>O</kbd></button><button id="goOut">Ir</button></div></div>
+      </div>
+      <p class="mut" id="durInfo" style="margin:0">Duración: —</p>
+
+      <label class="f">Hook (texto arriba del video)</label>
+      <textarea id="hook" placeholder="Ej: SE ARMÓ EL LÍO EN LA CASA 😱"></textarea>
+      <div class="row" style="margin-top:6px;flex-wrap:wrap" id="hookIdeas"></div>
+
+      <label class="f">Formato</label>
+      <div class="seg">
+        <label><input type="radio" name="fmt" value="vertical" checked><span>9:16 Vertical</span></label>
+        <label><input type="radio" name="fmt" value="cuadrado"><span>1:1 Cuadrado</span></label>
+        <label><input type="radio" name="fmt" value="horizontal"><span>16:9</span></label>
+      </div>
+
+      <div id="vertOpts">
+        <label class="f">Estilo vertical</label>
+        <div class="seg">
+          <label><input type="radio" name="mode" value="blur" checked><span>Fondo desenfocado</span></label>
+          <label><input type="radio" name="mode" value="fill"><span>Pantalla completa (recorte)</span></label>
+        </div>
+        <label class="f">Posición horizontal del recorte: <span id="posV">centro</span></label>
+        <input type="range" id="pos" min="0" max="100" value="50">
+        <label class="f">Zoom: <span id="zoomV">100%</span></label>
+        <input type="range" id="zoom" min="100" max="200" value="100">
+      </div>
+
+      <label class="f">Marca de agua / tu @usuario (opcional)</label>
+      <input type="text" id="wm" placeholder="@tucuenta">
+
+      <label class="f" style="display:flex;gap:8px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="subs"> Subtítulos automáticos palabra por palabra
+        <span class="mut" id="subsNote"></span>
+      </label>
+
+      <button class="pri big" id="btnRender" style="width:100%;margin-top:12px">🎬 Renderizar clip</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Trabajos</h2>
+    <div id="jobs" class="mut">Nada en proceso.</div>
+  </div>
+
+  <div class="card">
+    <h2>4 · Clips listos para subir</h2>
+    <div class="finals" id="finals"><p class="mut">Aquí salen tus clips renderizados.</p></div>
+    <div class="copy">
+      <div class="mut">Copy sugerido (clic para copiar):</div>
+      <div id="caption" style="cursor:pointer;margin-top:4px"></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = async (path, body, method) => {
+  const r = await fetch(path, {method: method || (body ? 'POST' : 'GET'),
+    headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.error || 'Error'); throw new Error(j.error); }
+  return j;
+};
+const fmt = s => { s = Math.max(0, s || 0); const m = Math.floor(s / 60); return m + ':' + (s % 60).toFixed(1).padStart(4, '0'); };
+const fmtLong = s => { s = Math.floor(s); const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60;
+  return (h ? h + ':' + String(m).padStart(2,'0') : m) + ':' + String(x).padStart(2,'0'); };
+
+let state = {}, current = null, inT = 0, outT = 0, lastVid = null, seenFinals = new Set(), seenCaps = new Set(), firstLoad = true;
+
+const HOOKS = ['SE ARMÓ EL LÍO 😱','NADIE ESPERABA ESTO 👀','SE DIJERON DE TODO 🔥','MIREN LO QUE PASÓ EN LA CASA','ESTO SE SALIÓ DE CONTROL','LA REACCIÓN DE TODOS 😂'];
+$('#hookIdeas').innerHTML = HOOKS.map(h => `<button type="button" style="flex:0 0 auto;font-size:12px;padding:5px 8px">${h}</button>`).join('');
+$('#hookIdeas').onclick = e => { if (e.target.tagName === 'BUTTON') $('#hook').value = e.target.textContent; };
+
+const CAPTION = '🔥 Lo que pasó hoy en La Casa de Alofoke 3 😱 ¿De qué lado estás? 👇\n#LaCasaDeAlofoke3 #Alofoke #LaCasaDeAlofoke #RD #Dominicana #viral #parati #fyp';
+$('#caption').textContent = CAPTION;
+$('#caption').onclick = () => { navigator.clipboard.writeText(CAPTION); $('#caption').style.color = 'var(--ok)'; setTimeout(() => $('#caption').style.color = '', 800); };
+
+try { $('#url').value = localStorage.getItem('url') || ''; $('#wm').value = localStorage.getItem('wm') || ''; } catch (e) {}
+
+$('#btnStart').onclick = async () => {
+  const url = $('#url').value.trim();
+  try { localStorage.setItem('url', url); } catch (e) {}
+  await api('/api/buffer/start', {url}); refresh();
+};
+$('#btnStop').onclick = async () => { await api('/api/buffer/stop', {}); refresh(); };
+
+$('#ckUp').onclick = async () => {
+  const f = $('#ckFile').files[0]; if (!f) return alert('Elige el archivo cookies.txt');
+  const fd = new FormData(); fd.append('file', f);
+  const r = await fetch('/api/cookies', {method: 'POST', body: fd}); const j = await r.json();
+  alert(r.ok ? 'Cookies guardadas ✅' : j.error); refresh();
+};
+$('#ckDel').onclick = async () => { await api('/api/cookies', null, 'DELETE'); refresh(); };
+
+const capture = async secs => { await api('/api/capture', {seconds: secs}); refresh(); };
+document.querySelectorAll('[data-cap]').forEach(b => b.onclick = () => capture(+b.dataset.cap));
+
+$('#btnVod').onclick = async () => {
+  await api('/api/capture', {url: $('#vodUrl').value.trim() || $('#url').value.trim(),
+    start: $('#vodStart').value, end: $('#vodEnd').value});
+  refresh();
+};
+
+// ---- editor
+const vid = $('#edVideo');
+function openClip(c) {
+  current = c;
+  $('#edEmpty').classList.add('hidden'); $('#edBody').classList.remove('hidden');
+  vid.src = '/clips/' + c.file + '?t=' + c.created;
+  inT = 0; outT = c.duration || 0; showMarks();
+  vid.onloadedmetadata = () => { if (!outT || outT > vid.duration) outT = vid.duration; showMarks(); };
+  renderLists();
+}
+function showMarks() {
+  $('#inT').textContent = fmt(inT); $('#outT').textContent = fmt(outT);
+  const d = outT - inT;
+  $('#durInfo').textContent = 'Duración: ' + (d > 0 ? d.toFixed(1) + ' s' : '⚠ la salida debe ir después de la entrada') +
+    (d > 180 ? ' (TikTok/Reels funcionan mejor < 90 s)' : '');
+}
+$('#btnIn').onclick = () => { inT = vid.currentTime; if (outT <= inT) outT = vid.duration; showMarks(); };
+$('#btnOut').onclick = () => { outT = vid.currentTime; showMarks(); };
+$('#goIn').onclick = () => { vid.currentTime = inT; vid.play(); };
+$('#goOut').onclick = () => { vid.currentTime = Math.max(0, outT - 3); vid.play(); };
+
+const updOpts = () => {
+  const f = document.querySelector('[name=fmt]:checked').value;
+  $('#vertOpts').classList.toggle('hidden', f === 'horizontal');
+  const p = +$('#pos').value; $('#posV').textContent = p < 40 ? 'izquierda ' + p : p > 60 ? 'derecha ' + p : 'centro';
+  $('#zoomV').textContent = $('#zoom').value + '%';
+};
+document.querySelectorAll('[name=fmt],#pos,#zoom').forEach(e => e.oninput = updOpts);
+updOpts();
+
+$('#btnRender').onclick = async () => {
+  if (!current) return;
+  try { localStorage.setItem('wm', $('#wm').value); } catch (e) {}
+  await api('/api/render', {
+    clip_id: current.id, in: inT, out: outT,
+    format: document.querySelector('[name=fmt]:checked').value,
+    mode: document.querySelector('[name=mode]:checked').value,
+    pos: +$('#pos').value, zoom: +$('#zoom').value,
+    hook: $('#hook').value, watermark: $('#wm').value, subs: $('#subs').checked
+  });
+  refresh();
+};
+
+document.addEventListener('keydown', e => {
+  if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+  const map = {'1': 30, '2': 60, '3': 120, '4': 300};
+  if (map[e.key]) capture(map[e.key]);
+  if (e.key === 'i' || e.key === 'I') $('#btnIn').click();
+  if (e.key === 'o' || e.key === 'O') $('#btnOut').click();
+});
+
+// ---- estado
+let lastSig = '';
+function renderLists() {
+  const sig = (state.clips || []).map(c => c.id).join() + '|' + (current ? current.id : '');
+  if (sig === lastSig) return; lastSig = sig;
+  const caps = (state.clips || []).filter(c => c.type === 'captura');
+  $('#caps').innerHTML = caps.length ? caps.map(c => `
+    <div class="item ${current && current.id === c.id ? 'sel' : ''}">
+      <div class="t"><b>${c.label}</b><span class="mut">${(c.duration || 0).toFixed(0)} s</span></div>
+      <button data-open="${c.id}">Editar</button>
+      <button data-del="${c.id}">🗑</button>
+    </div>`).join('') : '<p class="mut">Todavía no hay capturas.</p>';
+
+  const fins = (state.clips || []).filter(c => c.type === 'final');
+  $('#finals').innerHTML = fins.length ? fins.map(c => `
+    <div class="final">
+      <video src="/clips/${c.file}" controls preload="metadata" playsinline></video>
+      <div class="mut" style="padding:4px 6px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.label}</div>
+      <div class="a"><a class="btn" href="/clips/${c.file}?dl=1">⬇ Bajar</a><button data-del="${c.id}">🗑</button></div>
+    </div>`).join('') : '<p class="mut">Aquí salen tus clips renderizados.</p>';
+}
+document.body.addEventListener('click', async e => {
+  const o = e.target.dataset.open, d = e.target.dataset.del;
+  if (o) openClip(state.clips.find(c => c.id === o));
+  if (d && confirm('¿Borrar?')) { await api('/api/clip/' + d, null, 'DELETE'); if (current && current.id === d) current = null; refresh(); }
+});
+
+async function refresh() {
+  state = await api('/api/status');
+  const r = state.recorder;
+  $('#recState').innerHTML = r.running
+    ? `<span class="dot on"></span>Grabando · buffer ${fmtLong(r.buffer)} / ${fmtLong(r.max)}`
+    : `<span class="dot"></span>Sin grabar${r.buffer ? ' · buffer guardado ' + fmtLong(r.buffer) : ''}`;
+  $('#bufBar').style.width = Math.min(100, r.buffer / r.max * 100) + '%';
+  $('#recErr').classList.toggle('hidden', !r.error); $('#recErr').textContent = r.error || '';
+  document.querySelectorAll('[data-cap]').forEach(b => b.disabled = !r.buffer);
+  if (r.video_id && r.video_id !== lastVid) {
+    lastVid = r.video_id;
+    $('#player').innerHTML = `<iframe src="https://www.youtube.com/embed/${r.video_id}?autoplay=1&mute=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+  }
+  $('#ckState').textContent = state.cookies ? '✅ cargadas' : '(no cargadas)';
+  $('#subsNote').textContent = state.subs_available ? '' : '(instala requirements-subtitulos.txt)';
+  $('#subs').disabled = !state.subs_available;
+
+  $('#jobs').innerHTML = state.jobs.length ? state.jobs.map(j => `
+    <div class="job">${j.status === 'listo' ? '✅' : j.status === 'error' ? '❌' : '⏳'} ${j.label}
+      ${j.status === 'trabajando' ? `<div class="bar"><i style="width:${j.progress}%"></i></div>` : ''}
+      ${j.error ? `<div class="err">${j.error.replace(/</g, '&lt;')}</div>` : ''}</div>`).join('') : 'Nada en proceso.';
+
+  // abrir automáticamente la captura nueva en el editor
+  const caps = state.clips.filter(c => c.type === 'captura');
+  const fresh = caps.find(c => !seenCaps.has(c.id));
+  caps.forEach(c => seenCaps.add(c.id));
+  if (!firstLoad && fresh) openClip(fresh); else renderLists();
+  firstLoad = false;
+}
+refresh();
+setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 1500);
+</script>
+</body>
+</html>

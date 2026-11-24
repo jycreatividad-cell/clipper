@@ -1,0 +1,7 @@
+buffer/
+clips/
+tmp/
+.venv/
+__pycache__/
+cookies.txt
+*.zip
