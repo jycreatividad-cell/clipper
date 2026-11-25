@@ -27,9 +27,12 @@ import webbrowser
 from functools import lru_cache
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_file, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import hooks
+import moments
+from social import Social
 
 BASE = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("DATA_DIR", str(BASE))).resolve()  # en servidor: un volumen persistente
@@ -51,7 +54,14 @@ QUALITY = os.environ.get("CALIDAD", "1080")  # altura máxima a grabar
 LIVE_FORMAT = (f"b[height<={QUALITY}]/bv*[height<={QUALITY}]+ba/b/bv*+ba/best")
 
 app = Flask(__name__, static_folder=str(BASE / "static"))
-app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # https detrás de Railway/Render
+social = Social(DATA)
+LOGO = DATA / "logo.png"
+RENDER_WORKERS = int(os.environ.get("RENDER_WORKERS", "2"))  # clips renderizándose a la vez
+RENDER_SEM = threading.Semaphore(RENDER_WORKERS)
+markers = []                       # momentos marcados con la tecla M
+markers_lock = threading.Lock()
 
 # las cookies también se pueden pasar como variable de entorno (contenido de cookies.txt)
 if os.environ.get("YT_COOKIES") and not COOKIES.exists():
@@ -61,7 +71,7 @@ if os.environ.get("YT_COOKIES") and not COOKIES.exists():
 @app.before_request
 def require_password():
     """Protección con usuario/contraseña (Basic Auth) cuando APP_PASSWORD está definida."""
-    if not APP_PASSWORD or request.path == "/healthz":
+    if not APP_PASSWORD or request.path == "/healthz" or request.path.startswith("/pub/"):
         return None
     auth = request.authorization
     import hmac
@@ -142,13 +152,21 @@ def update_job(jid, **kw):
             jobs[jid].update(kw)
 
 
+def clean_error(e):
+    """Mensaje de error sin tokens ni claves."""
+    msg = str(e)
+    msg = re.sub(r"(access_token|client_secret|fb_exchange_token|refresh_token|code)=[^&\s'\")]+", r"\1=***", msg)
+    msg = re.sub(r"HTTPSConnectionPool\(host='([^']+)'.*", r"No se pudo conectar con \1 (revisa la conexión a internet del servidor).", msg)
+    return msg
+
+
 def run_job(jid, fn, *args):
     def target():
         try:
             fn(jid, *args)
             update_job(jid, status="listo", progress=100)
         except Exception as e:  # noqa: BLE001
-            update_job(jid, status="error", error=str(e)[-600:])
+            update_job(jid, status="error", error=clean_error(e)[-600:])
     threading.Thread(target=target, daemon=True).start()
 
 
@@ -385,6 +403,46 @@ class Recorder:
         except FileNotFoundError:
             return 0
 
+    def seg_table(self):
+        """[(número, ruta, inicio, duración)] de los segmentos terminados + duración total."""
+        table, cum = [], 0.0
+        for f in self.segments():
+            try:
+                d = self.seg_dur(f)
+            except FileNotFoundError:
+                continue
+            table.append((int(f.stem.split("_")[1]), f, cum, d))
+            cum += d
+        return table, cum
+
+    def live_anchor(self):
+        """Punto actual del directo (final del último segmento terminado)."""
+        table, _ = self.seg_table()
+        if not table:
+            raise RuntimeError("El buffer está vacío. Inicia la grabación primero.")
+        return table[-1][0], table[-1][3]
+
+    def capture_window(self, num, off, before, after, dest_dir):
+        """Copia lo necesario para [ancla - before, ancla + after]. -> (copias, inicio, duración)"""
+        with self.lock:
+            table, total = self.seg_table()
+            idx = next((i for i, r in enumerate(table) if r[0] == num), None)
+            if idx is None:
+                if table and num > table[-1][0]:
+                    raise NeedMore(after)
+                raise RuntimeError("Ese momento ya salió del buffer (es más viejo que el tiempo guardado).")
+            anchor = table[idx][2] + off
+            start, end = max(0.0, anchor - before), anchor + after
+            if end > total + 0.05:
+                raise NeedMore(end - total)
+            chosen = [r for r in table if r[2] + r[3] > start and r[2] < end]
+            copies = []
+            for r in chosen:
+                dst = dest_dir / r[1].name
+                link_or_copy(r[1], dst)
+                copies.append(dst)
+            return copies, start - chosen[0][2], end - start
+
     def capture(self, seconds, dest_dir):
         """Copia los segmentos que cubren los últimos `seconds` segundos."""
         with self.lock:
@@ -404,6 +462,17 @@ class Recorder:
                 shutil.copy2(f, dst)
                 copies.append(dst)
         return copies, total
+
+
+class NeedMore(Exception):
+    """Todavía no se ha grabado el final de la ventana pedida."""
+
+
+def link_or_copy(src, dst):
+    try:
+        os.link(src, dst)  # instantáneo y sobrevive a la limpieza del buffer
+    except OSError:
+        shutil.copy2(src, dst)
 
 
 rec = Recorder()
@@ -446,6 +515,95 @@ def job_capture_buffer(jid, seconds):
     update_job(jid, result=cid)
 
 
+def capture_anchor(jid, num, off, before, after, label, auto=False):
+    """Captura alrededor de un punto del directo; espera si el final aún no se ha grabado."""
+    cid = "cap_" + time.strftime("%H%M%S") + "_" + jid[:4]
+    work = TMP / cid
+    work.mkdir()
+    deadline = time.time() + after + 60
+    while True:
+        try:
+            copies, offset, dur = rec.capture_window(num, off, before, after, work)
+            break
+        except NeedMore as e:
+            if time.time() > deadline or not rec.running:
+                raise RuntimeError("El directo no avanzó lo suficiente para completar el clip.") from e
+            update_job(jid, label=f"Esperando {int(e.args[0]) + 1}s más del directo…")
+            time.sleep(2)
+    (work / "list.txt").write_text("".join(f"file '{c.name}'\n" for c in copies), encoding="utf-8")
+    out = CLIPS / f"{cid}.mp4"
+    run_ffmpeg(["-f", "concat", "-safe", "0", "-i", "list.txt", "-ss", f"{offset:.2f}", "-t", f"{dur:.2f}",
+                "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", str(out)],
+               cwd=str(work))
+    shutil.rmtree(work, ignore_errors=True)
+    save_meta(cid, {"id": cid, "type": "captura", "file": out.name, "created": time.time(),
+                    "duration": ffprobe_duration(out), "source": rec.url, "auto": auto,
+                    "label": label})
+    return cid
+
+
+def job_capture_anchor(jid, num, off, before, after, label):
+    update_job(jid, result=capture_anchor(jid, num, off, before, after, label))
+
+
+def job_moments(jid, d):
+    """Busca las tomas importantes en el buffer del directo o en una captura."""
+    before, after = float(d.get("before", 20)), float(d.get("after", 8))
+    top = int(d.get("top", 8))
+    if d.get("clip_id"):
+        meta = json.loads(meta_path(d["clip_id"]).read_text(encoding="utf-8"))
+        update_job(jid, progress=20)
+        lv = moments.loudness_curve(["-i", str(CLIPS / meta["file"])])
+        found = moments.find_moments(lv, top=top, before=before, after=after,
+                                     total=meta.get("duration"), min_gap=max(12.0, before))
+        for m in found:
+            m.update(kind="capture", clip_id=d["clip_id"])
+        update_job(jid, result={"moments": found, "source": meta.get("label")})
+        return
+    minutes = float(d.get("minutes", 10))
+    work = TMP / ("mom_" + jid)
+    work.mkdir()
+    with rec.lock:
+        table, total = rec.seg_table()
+        if not table:
+            raise RuntimeError("El buffer está vacío.")
+        rows = [r for r in table if r[2] + r[3] >= total - minutes * 60]
+        for r in rows:
+            link_or_copy(r[1], work / r[1].name)
+    w0 = rows[0][2]
+    (work / "list.txt").write_text("".join(f"file '{(work / r[1].name).as_posix()}'\n" for r in rows),
+                                   encoding="utf-8")
+    update_job(jid, progress=20, label=f"Analizando los últimos {int(minutes)} min…")
+    lv = moments.loudness_curve(["-f", "concat", "-safe", "0", "-i", str(work / "list.txt")])
+    shutil.rmtree(work, ignore_errors=True)
+    found = moments.find_moments(lv, top=top, before=before, after=after, total=total - w0,
+                                 min_gap=max(12.0, before))
+    for m in found:
+        absolute = w0 + m["t"]
+        row = next((r for r in rows if r[2] <= absolute < r[2] + r[3]), rows[-1])
+        m.update(kind="anchor", seg=row[0], off=round(absolute - row[2], 2),
+                 ago=round(total - absolute), before=before, after=after)
+    found.sort(key=lambda m: m["ago"], reverse=True)
+    update_job(jid, result={"moments": found, "source": f"últimos {int(minutes)} min"})
+
+
+def job_batch_item(jid, item, settings):
+    """Un clip del lote: captura (si viene del directo) + render con la configuración común."""
+    opts = dict(settings)
+    label = item.get("label") or "Clip"
+    if item.get("kind") == "anchor":
+        update_job(jid, label=f"{label}: capturando…")
+        cid = capture_anchor(jid, int(item["seg"]), float(item["off"]), float(item.get("before", 20)),
+                             float(item.get("after", 8)), label, auto=True)
+        opts.update(clip_id=cid, **{"in": 0, "out": None})
+    else:
+        opts.update(clip_id=item["clip_id"], **{"in": item.get("in", 0), "out": item.get("out")})
+    if item.get("hook") is not None:
+        opts["hook"] = item["hook"]
+    update_job(jid, label=f"{label}: renderizando…")
+    job_render(jid, opts)
+
+
 def job_capture_vod(jid, url, start, end):
     cid = "cap_" + time.strftime("%H%M%S") + "_" + jid[:4]
     out_tpl = str(CLIPS / f"{cid}.%(ext)s")
@@ -485,6 +643,7 @@ FORMATS = {
 }
 
 _whisper = {}
+_whisper_lock = threading.Lock()
 
 
 def transcribe_words(audio_path):
@@ -492,8 +651,9 @@ def transcribe_words(audio_path):
         from faster_whisper import WhisperModel
     except ImportError as e:
         raise RuntimeError("Para subtítulos instala: pip install -r requirements-subtitulos.txt") from e
-    if "m" not in _whisper:
-        _whisper["m"] = WhisperModel(WHISPER_MODEL, device="auto", compute_type="int8")
+    with _whisper_lock:
+        if "m" not in _whisper:
+            _whisper["m"] = WhisperModel(WHISPER_MODEL, device="auto", compute_type="int8")
     segments, _ = _whisper["m"].transcribe(str(audio_path), language="es",
                                             word_timestamps=True, vad_filter=True)
     words = []
@@ -512,9 +672,28 @@ def ass_time(t):
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
-def build_ass(words, w, h, family, path, per_chunk=3):
-    size = int(w * 0.085) if w < h else int(h * 0.075)
-    margin_v = int(h * 0.28) if w < h else int(h * 0.10)
+SUB_STYLES = {
+    # nombre: (color base, color palabra actual BGR, borde, caja, palabras por línea)
+    "amarillo": ("&H00FFFFFF", "&H0000E6FF", True, False, 3),
+    "verde": ("&H00FFFFFF", "&H0066FF00", True, False, 3),
+    "caja": ("&H00FFFFFF", "&H0000E6FF", False, True, 4),
+    "blanco": ("&H00FFFFFF", None, True, False, 4),
+}
+
+
+def build_ass(words, w, h, family, path, style="amarillo", pos="abajo"):
+    base, hi, outline, box, per_chunk = SUB_STYLES.get(style, SUB_STYLES["amarillo"])
+    vertical = w < h
+    size = int(w * (0.095 if vertical else 0.05)) if family == "Anton" else int(w * 0.085 if vertical else h * 0.075)
+    if pos == "centro":
+        align, margin_v = 5, 0
+    elif pos == "arriba":
+        align, margin_v = 8, int(h * (0.30 if vertical else 0.08))
+    else:
+        align, margin_v = 2, int(h * (0.26 if vertical else 0.08))
+    border_style = 3 if box else 1
+    outl = max(4, size // 10) if outline else max(8, size // 6)
+    back = "&H00000000" if box else "&H96000000"
     head = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {w}
@@ -523,7 +702,7 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,{family},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{max(4, size // 12)},3,2,60,60,{margin_v},1
+Style: Sub,{family},{size},{base},{base},&H00000000,{back},0,0,0,0,100,100,1,0,{border_style},{outl},{0 if box else 3},{align},70,70,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -539,12 +718,76 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             parts = []
             for j, (_, _, txt) in enumerate(chunk):
                 txt = txt.upper().replace("{", "").replace("}", "")
-                if j == i:  # palabra actual en amarillo y un poco más grande
-                    parts.append(r"{\c&H00FFFF&\fscx110\fscy110}" + txt + r"{\c&HFFFFFF&\fscx100\fscy100}")
+                if j == i and hi:  # palabra que se está diciendo
+                    grow = "" if box else "\\fscx112\\fscy112"
+                    back = "" if box else "\\fscx100\\fscy100"
+                    parts.append("{\\c" + hi + "&" + grow + "}" + txt + "{\\c" + base + "&" + back + "}")
                 else:
                     parts.append(txt)
             lines.append(f"Dialogue: 0,{ass_time(st)},{ass_time(max(nxt, st + 0.05))},Sub,,0,0,0,,{' '.join(parts)}")
     Path(path).write_text(head + "\n".join(lines) + "\n", encoding="utf-8")
+
+
+def corner_xy(pos, W, H, ow="w", oh="h", main_w="W", main_h="H"):
+    """Expresiones x:y para poner algo en una esquina, respetando la zona de botones de TikTok."""
+    m = int(min(W, H) * 0.04)
+    bottom = int(H * 0.15) if H > W else m
+    top = int(H * 0.05) if H > W else m
+    xs = {"izq": f"{m}", "der": f"{main_w}-{ow}-{m}", "centro": f"({main_w}-{ow})/2"}
+    ys = {"sup": f"{top}", "inf": f"{main_h}-{oh}-{bottom}"}
+    v, _, hz = (pos or "abajo").partition("_")
+    if pos in ("abajo", "inf_centro"):
+        return xs["centro"], ys["inf"]
+    if pos == "arriba":
+        return xs["centro"], ys["sup"]
+    return xs.get(hz, xs["centro"]), ys.get(v, ys["inf"])
+
+
+def video_lead(path):
+    """Segundos de solo audio antes del primer cuadro de video."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,start_time",
+                          "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout
+    starts = {}
+    for line in out.splitlines():
+        kind, _, st = line.partition(",")
+        try:
+            starts.setdefault(kind, float(st))
+        except ValueError:
+            pass
+    if "video" in starts and "audio" in starts:
+        return max(0.0, min(2.0, starts["video"] - starts["audio"]))
+    return 0.0
+
+
+def has_audio(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+                          "stream=index", "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout
+    return bool(out.strip())
+
+
+def make_cover(src, t, opts, W, H):
+    """Portada: fotograma + oscurecido suave + hook grande."""
+    from io import BytesIO
+    from PIL import Image
+    fmt = opts.get("format", "vertical")
+    mode = opts.get("cover_mode") or "fill"
+    raw = preview_frame(str(src), src.stat().st_mtime, round(float(t), 1), fmt, mode, W, H)
+    frame = Image.open(BytesIO(raw)).convert("RGBA") if raw else preview_background(W, H).copy()
+    col = Image.new("L", (1, H))
+    for y in range(H):  # degradado: más oscuro arriba y abajo para que el texto resalte
+        col.putpixel((0, y), int(150 * max(0.0, abs(y / H - 0.5) * 2 - 0.25) / 0.75))
+    shade = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+    shade.putalpha(col.resize((W, H)))
+    frame = Image.alpha_composite(frame, shade)
+    text = (opts.get("cover_text") or opts.get("hook") or "").strip()
+    if text:
+        style = opts.get("cover_style") or opts.get("hook_style") or hooks.DEFAULT_STYLE
+        kw = hook_kwargs(opts, style, W, H)
+        kw["scale"] = kw["scale"] * float(opts.get("cover_size", 125)) / 100
+        img = hooks.render_hook(text, style, W, **kw)
+        if img:
+            frame.alpha_composite(img, (0, hook_y(opts.get("cover_pos", "centro"), W, H, img.height)))
+    return frame.convert("RGB")
 
 
 def job_render(jid, opts):
@@ -552,6 +795,7 @@ def job_render(jid, opts):
     src = CLIPS / src_meta["file"]
     t_in = float(opts.get("in") or 0)
     t_out = float(opts.get("out") or src_meta.get("duration") or ffprobe_duration(src))
+    t_in = max(t_in, video_lead(src))  # las capturas pueden empezar con ~0.5 s de solo audio
     dur = t_out - t_in
     if dur <= 0.3:
         raise RuntimeError("La salida debe ser mayor que la entrada.")
@@ -566,11 +810,25 @@ def job_render(jid, opts):
     work.mkdir()
 
     font, family = find_font()
+    fontfile = None
     if font:
         shutil.copy(font, work / ("font" + font.suffix.lower()))
         fontfile = "font" + font.suffix.lower()
+    anton = BASE / "fonts" / "Anton-Regular.ttf"
+    if anton.exists():
+        shutil.copy(anton, work / anton.name)
+        sub_family = "Anton"
     else:
-        fontfile = None
+        sub_family = family
+
+    inputs = []
+
+    n_inputs = [1]
+
+    def add_input(path, pre=()):
+        inputs.extend([*pre, "-i", str(path)])
+        n_inputs[0] += 1
+        return n_inputs[0] - 1  # 0 es el video
 
     # ---- video base
     if fmt == "horizontal":
@@ -590,60 +848,133 @@ def job_render(jid, opts):
     last = "v0"
     n = 0
 
-    def add(filter_str):
+    def add(filter_str, extra=None):
         nonlocal last, n
         n += 1
-        chain.append(f"[{last}]{filter_str}[v{n}]")
+        src_lbl = f"[{last}]" + (f"[{extra}]" if extra else "")
+        chain.append(f"{src_lbl}{filter_str}[v{n}]")
         last = f"v{n}"
 
-    font_opt = f"fontfile={fontfile}:" if fontfile else ""
-
-    # ---- hook (imagen PNG con el estilo elegido, ver hooks.py)
-    hook = (opts.get("hook") or "").strip()
-    extra_inputs = []
-    if hook:
-        img = hooks.render_hook(hook, opts.get("hook_style") or hooks.DEFAULT_STYLE, W,
-                                **hook_kwargs(opts, opts.get("hook_style") or "", W, H))
-        if img:
-            img.save(work / "hook.png")
-            extra_inputs = ["-i", "hook.png"]
-            y = hook_y(opts.get("hook_pos", "arriba"), W, H, img.height)
-            chain.append(f"[{last}][1:v]overlay=0:{y}:eof_action=repeat[vh]")
-            last = "vh"
-
-    # ---- marca de agua / @usuario
-    wm = (opts.get("watermark") or "").strip()
-    if wm:
-        (work / "wm.txt").write_text(wm, encoding="utf-8")
-        fs = int(min(W, H) * 0.04)
-        y = f"h-{int(H * 0.16)}" if H > W else f"h-{int(fs * 2)}"
-        add(f"drawtext={font_opt}textfile=wm.txt:fontsize={fs}:fontcolor=white@0.85:"
-            f"borderw=3:bordercolor=black@0.6:x=(w-text_w)/2:y={y}")
-
-    # ---- subtítulos automáticos
+    # ---- subtítulos automáticos (van debajo del hook y de la marca)
     if opts.get("subs"):
-        update_job(jid, label="Transcribiendo audio…", progress=5)
+        update_job(jid, label="Transcribiendo audio…", progress=3)
         wav = work / "audio.wav"
         run_ffmpeg(["-ss", f"{t_in:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
                     "-vn", "-ac", "1", "-ar", "16000", str(wav)])
         words = transcribe_words(wav)
         if words:
-            build_ass(words, W, H, family, work / "subs.ass")
+            build_ass(words, W, H, sub_family, work / "subs.ass",
+                      style=opts.get("subs_style", "amarillo"), pos=opts.get("subs_pos", "abajo"))
             add("subtitles=subs.ass:fontsdir=.")
-        update_job(jid, label="Renderizando clip…")
 
+    # ---- hook (imagen PNG con el estilo elegido, ver hooks.py)
+    hook = (opts.get("hook") or "").strip()
+    if hook:
+        img = hooks.render_hook(hook, opts.get("hook_style") or hooks.DEFAULT_STYLE, W,
+                                **hook_kwargs(opts, opts.get("hook_style") or "", W, H))
+        if img:
+            img.save(work / "hook.png")
+            k = add_input(work / "hook.png")
+            y = hook_y(opts.get("hook_pos", "arriba"), W, H, img.height)
+            add(f"overlay=0:{y}:eof_action=repeat", f"{k}:v")
+
+    # ---- marca de agua: logo
+    if opts.get("logo") and LOGO.exists():
+        lw = int(W * min(40, max(5, float(opts.get("logo_size", 16)))) / 100) // 2 * 2
+        op = min(1.0, max(0.1, float(opts.get("logo_op", 90)) / 100))
+        k = add_input(LOGO)
+        x, y = corner_xy(opts.get("logo_pos", "sup_der"), W, H)
+        chain.append(f"[{k}:v]scale={lw}:-1,format=rgba,colorchannelmixer=aa={op:.2f}[lg]")
+        add(f"overlay={x}:{y}:eof_action=repeat", "lg")
+
+    # ---- marca de agua: texto / @usuario
+    wm = (opts.get("watermark") or "").strip()
+    if wm:
+        (work / "wm.txt").write_text(wm, encoding="utf-8")
+        fs = int(min(W, H) * 0.042)
+        op = min(1.0, max(0.1, float(opts.get("wm_op", 85)) / 100))
+        x, y = corner_xy(opts.get("wm_pos", "abajo"), W, H, "text_w", "text_h", "w", "h")
+        font_opt = f"fontfile={fontfile}:" if fontfile else ""
+        add(f"drawtext={font_opt}textfile=wm.txt:fontsize={fs}:fontcolor=white@{op:.2f}:"
+            f"borderw=3:bordercolor=black@{op * 0.7:.2f}:x={x}:y={y}")
+
+    # ---- portada como primer cuadro (0.35 s antes del clip; TikTok usa el primer cuadro de portada)
+    cover_file = None
+    audio_map = "0:a:0?"
+    total = dur
+    if opts.get("cover_first"):
+        ct = float(opts.get("cover_t") if opts.get("cover_t") not in (None, "") else t_in + 0.5)
+        cover = make_cover(src, ct, opts, W, H)
+        cover.save(work / "cover.png")
+        cover_file = CLIPS / f"{rid}_portada.jpg"
+        cover.save(cover_file, quality=92)
+        cl = 0.35
+        k = add_input(work / "cover.png", ("-loop", "1", "-framerate", "30", "-t", str(cl)))
+        chain.append(f"[{k}:v]scale={W}:{H},setsar=1,fps=30,format=yuv420p[cv]")
+        chain.append(f"[{last}]fps=30,format=yuv420p[mv]")
+        if has_audio(src):
+            chain.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{cl}[sil]")
+            chain.append("[0:a]aresample=48000,aformat=channel_layouts=stereo[ma]")
+            chain.append("[cv][sil][mv][ma]concat=n=2:v=1:a=1[vout][aout]")
+            audio_map = "[aout]"
+        else:
+            chain.append("[cv][mv]concat=n=2:v=1:a=0[vout]")
+        last = "vout"
+        total = dur + cl
+
+    fast = opts.get("speed", "rapido") != "calidad"
     out = CLIPS / f"{rid}.mp4"
     filt = ";".join(chain)
-    cmd = ["-ss", f"{t_in:.3f}", "-t", f"{dur:.3f}", "-i", str(src), *extra_inputs,
-           "-filter_complex", filt, "-map", f"[{last}]", "-map", "0:a:0?",
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-           "-r", "30", "-c:a", "aac", "-b:a", "160k", "-t", f"{dur:.3f}", "-movflags", "+faststart", str(out)]
-    run_ffmpeg(cmd, jid=jid, total=dur, cwd=str(work))
+    cmd = ["-ss", f"{t_in:.3f}", "-t", f"{dur:.3f}", "-i", str(src), *inputs,
+           "-filter_complex", filt, "-map", f"[{last}]", "-map", audio_map,
+           "-c:v", "libx264", "-preset", "superfast" if fast else "veryfast", "-crf", "22" if fast else "19",
+           "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "160k", "-t", f"{total:.3f}",
+           "-movflags", "+faststart", str(out)]
+    update_job(jid, label=(opts.get("_label") or "Renderizando clip") + " · en cola…")
+    with RENDER_SEM:
+        update_job(jid, label=(opts.get("_label") or "Renderizando clip") + "…")
+        run_ffmpeg(cmd, jid=jid, total=total, cwd=str(work))
     shutil.rmtree(work, ignore_errors=True)
     save_meta(rid, {"id": rid, "type": "final", "file": out.name, "created": time.time(),
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
-                    "label": hook.replace("*", "")[:60] or f"Clip {fmt} {dur:.0f}s"})
+                    "cover": cover_file.name if cover_file else None,
+                    "label": hook.replace("*", "")[:60] or src_meta.get("label") or f"Clip {fmt} {dur:.0f}s"})
     update_job(jid, result=rid)
+    return rid
+
+
+def job_cover(jid, opts):
+    meta = json.loads(meta_path(opts["clip_id"]).read_text(encoding="utf-8"))
+    src = CLIPS / meta["file"]
+    W, H = FORMATS.get(opts.get("format", "vertical"), FORMATS["vertical"])
+    img = make_cover(src, float(opts.get("t", 0)), opts, W, H)
+    pid = "portada_" + time.strftime("%H%M%S") + "_" + jid[:4]
+    img.save(CLIPS / f"{pid}.jpg", quality=92)
+    text = (opts.get("cover_text") or opts.get("hook") or "").replace("*", "")
+    save_meta(pid, {"id": pid, "type": "portada", "file": f"{pid}.jpg", "created": time.time(),
+                    "label": "Portada · " + (text[:40] or meta.get("label", ""))})
+    update_job(jid, result=pid)
+
+
+def job_publish(jid, target, clip_id, caption, tiktok_mode, base):
+    meta = json.loads(meta_path(clip_id).read_text(encoding="utf-8"))
+    path = CLIPS / meta["file"]
+    prog = lambda p: update_job(jid, progress=p)  # noqa: E731
+    if target == "facebook":
+        msg = social.publish_facebook(path, caption, prog)
+    elif target == "instagram":
+        if not base or "127.0.0.1" in base or "localhost" in base:
+            raise RuntimeError("Instagram necesita descargar el video desde internet: usa la app publicada "
+                               "(Railway/Render) o define PUBLIC_URL.")
+        url = base + "pub/" + social.public_link(path) + "/" + path.name
+        cover = meta.get("cover")
+        cover_url = (base + "pub/" + social.public_link(CLIPS / cover) + "/" + cover) if cover and (CLIPS / cover).exists() else None
+        msg = social.publish_instagram(url, caption, cover_url, prog)
+    elif target == "tiktok":
+        msg = social.publish_tiktok(path, caption, tiktok_mode, prog)
+    else:
+        raise RuntimeError("Red desconocida")
+    update_job(jid, label=msg)
 
 
 def hook_kwargs(o, style, W, H, prefix="hook_"):
@@ -789,6 +1120,12 @@ def api_stop():
 @app.post("/api/capture")
 def api_capture():
     d = request.json or {}
+    if d.get("anchor"):
+        a = d["anchor"]
+        jid = new_job("captura", "Capturando " + (a.get("label") or "momento"))
+        run_job(jid, job_capture_anchor, int(a["seg"]), float(a["off"]), float(a.get("before", 20)),
+                float(a.get("after", 6)), a.get("label") or "Momento")
+        return jsonify(job=jid)
     if d.get("seconds"):
         secs = float(d["seconds"])
         jid = new_job("captura", f"Capturando últimos {int(secs)}s")
@@ -815,6 +1152,201 @@ def api_render():
     return jsonify(job=jid)
 
 
+# ---- marcadores (tecla M) y tomas importantes
+@app.post("/api/marker")
+def api_marker():
+    try:
+        num, off = rec.live_anchor()
+    except RuntimeError as e:
+        return jsonify(error=str(e)), 400
+    m = {"id": uuid.uuid4().hex[:6], "seg": num, "off": off, "created": time.time(),
+         "label": (request.json or {}).get("label") or "Momento " + time.strftime("%I:%M:%S %p")}
+    with markers_lock:
+        markers.insert(0, m)
+        del markers[60:]
+    return jsonify(m)
+
+
+@app.delete("/api/marker/<mid>")
+def api_marker_delete(mid):
+    with markers_lock:
+        markers[:] = [m for m in markers if m["id"] != mid]
+    return jsonify(ok=True)
+
+
+@app.post("/api/marker/<mid>/capture")
+def api_marker_capture(mid):
+    d = request.json or {}
+    m = next((x for x in markers if x["id"] == mid), None)
+    if not m:
+        return jsonify(error="Marcador no encontrado"), 404
+    jid = new_job("captura", "Capturando " + m["label"])
+    run_job(jid, job_capture_anchor, m["seg"], m["off"], float(d.get("before", 25)),
+            float(d.get("after", 5)), m["label"])
+    return jsonify(job=jid)
+
+
+@app.post("/api/moments")
+def api_moments():
+    d = request.json or {}
+    if not d.get("clip_id") and not rec.segments():
+        return jsonify(error="No hay nada grabado todavía."), 400
+    jid = new_job("momentos", "Buscando tomas importantes…")
+    run_job(jid, job_moments, d)
+    return jsonify(job=jid)
+
+
+@app.get("/api/job/<jid>")
+def api_job(jid):
+    with jobs_lock:
+        j = jobs.get(jid)
+    return (jsonify(j), 200) if j else (jsonify(error="no existe"), 404)
+
+
+@app.post("/api/batch")
+def api_batch():
+    """Varios clips a la vez con la misma configuración."""
+    d = request.json or {}
+    items, settings = d.get("items") or [], d.get("settings") or {}
+    if not items:
+        return jsonify(error="Elige al menos un momento"), 400
+    if len(items) > 20:
+        return jsonify(error="Máximo 20 clips por lote"), 400
+    ids = []
+    for i, it in enumerate(items, 1):
+        it.setdefault("label", f"Clip {i}/{len(items)}")
+        st = dict(settings, _label=it["label"])
+        jid = new_job("render", it["label"])
+        run_job(jid, job_batch_item, it, st)
+        ids.append(jid)
+    return jsonify(jobs=ids)
+
+
+# ---- portada
+@app.post("/api/cover")
+def api_cover():
+    d = request.json or {}
+    if not d.get("clip_id") or not meta_path(d["clip_id"]).exists():
+        return jsonify(error="Captura no encontrada"), 404
+    jid = new_job("portada", "Creando portada…")
+    run_job(jid, job_cover, d)
+    return jsonify(job=jid)
+
+
+# ---- logo para marca de agua
+@app.post("/api/logo")
+def api_logo():
+    from PIL import Image
+    f = request.files.get("file")
+    if not f:
+        return jsonify(error="Sube una imagen (PNG con fondo transparente es lo ideal)"), 400
+    try:
+        im = Image.open(f.stream).convert("RGBA")
+    except Exception:  # noqa: BLE001
+        return jsonify(error="Esa imagen no se pudo abrir"), 400
+    im.thumbnail((1200, 1200))
+    im.save(LOGO)
+    return jsonify(ok=True)
+
+
+@app.delete("/api/logo")
+def api_logo_delete():
+    LOGO.unlink(missing_ok=True)
+    return jsonify(ok=True)
+
+
+@app.get("/api/logo.png")
+def api_logo_file():
+    return send_file(LOGO, max_age=0) if LOGO.exists() else ("", 404)
+
+
+# ---- cuentas y publicación
+def public_base():
+    base = os.environ.get("PUBLIC_URL", "").strip() or request.url_root
+    return base.rstrip("/") + "/"
+
+
+def _oauth_page(msg, ok=False):
+    color = "#22c55e" if ok else "#ff2e63"
+    return (f"<html><body style='background:#0d0d10;color:#eee;font:16px system-ui;padding:40px'>"
+            f"<h2 style='color:{color}'>{'✅' if ok else '❌'} {msg}</h2><a style='color:#ffd60a' href='/'>Volver a Clipper</a>"
+            f"<script>setTimeout(()=>location.href='/',{2500 if ok else 15000})</script></body></html>")
+
+
+@app.get("/oauth/<net>/start")
+def oauth_start(net):
+    redirect_uri = public_base() + f"oauth/{net}/callback"
+    try:
+        url = social.meta_auth_url(redirect_uri) if net == "meta" else social.tiktok_auth_url(redirect_uri)
+    except KeyError:
+        return _oauth_page("Falta configurar la app de desarrollador en el servidor (ver README)."), 400
+    return redirect(url)
+
+
+@app.get("/oauth/<net>/callback")
+def oauth_callback(net):
+    if request.args.get("error"):
+        return _oauth_page("Conexión cancelada: " + request.args.get("error_description", request.args["error"]))
+    if not social.check_state(request.args.get("state"), net):
+        return _oauth_page("La sesión de conexión venció. Inténtalo otra vez."), 400
+    redirect_uri = public_base() + f"oauth/{net}/callback"
+    try:
+        if net == "meta":
+            social.meta_callback(request.args.get("code", ""), redirect_uri)
+        else:
+            social.tiktok_callback(request.args.get("code", ""), redirect_uri)
+    except Exception as e:  # noqa: BLE001
+        return _oauth_page("No se pudo conectar: " + clean_error(e)[:300]), 400
+    return _oauth_page(("Facebook / Instagram" if net == "meta" else "TikTok") + " conectado", ok=True)
+
+
+@app.post("/api/cuentas")
+def api_cuentas():
+    d = request.json or {}
+    try:
+        if d.get("fb_page_id") and d.get("fb_token"):
+            social.set_manual_meta(d["fb_page_id"].strip(), d["fb_token"].strip(), (d.get("ig_id") or "").strip() or None)
+        if d.get("tiktok_token"):
+            social.set_manual_tiktok(d["tiktok_token"].strip())
+        if d.get("page_id"):
+            social.select_page(d["page_id"])
+    except Exception as e:  # noqa: BLE001
+        return jsonify(error=clean_error(e)[:400]), 400
+    return jsonify(social.status())
+
+
+@app.delete("/api/cuentas/<net>")
+def api_cuentas_delete(net):
+    social.disconnect(net)
+    return jsonify(social.status())
+
+
+@app.post("/api/publish")
+def api_publish():
+    d = request.json or {}
+    cid = d.get("clip_id", "")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", cid) or not meta_path(cid).exists():
+        return jsonify(error="Clip no encontrado"), 404
+    targets = [t for t in d.get("targets", []) if t in ("facebook", "instagram", "tiktok")]
+    if not targets:
+        return jsonify(error="Elige dónde publicar"), 400
+    names = {"facebook": "Facebook", "instagram": "Instagram", "tiktok": "TikTok"}
+    ids = []
+    for t in targets:
+        jid = new_job("publicar", f"Publicando en {names[t]}…")
+        run_job(jid, job_publish, t, cid, d.get("caption", ""), d.get("tiktok_mode", "inbox"), public_base())
+        ids.append(jid)
+    return jsonify(jobs=ids)
+
+
+@app.get("/pub/<tok>/<name>")
+def public_file(tok, name):
+    path = Social.resolve_public(tok)
+    if not path or Path(path).name != name:
+        return "No encontrado", 404
+    return send_file(path, conditional=True)
+
+
 @app.delete("/api/clip/<cid>")
 def api_delete(cid):
     if not re.fullmatch(r"[A-Za-z0-9_]+", cid):
@@ -836,13 +1368,15 @@ def api_status():
             pass
     clips.sort(key=lambda c: c["created"], reverse=True)
     with jobs_lock:
-        js = sorted(jobs.values(), key=lambda j: j["created"], reverse=True)[:12]
+        js = sorted(jobs.values(), key=lambda j: j["created"], reverse=True)[:30]
     return jsonify(
         recorder={"running": rec.running, "url": rec.url, "error": rec.error,
                   "buffer": rec.buffer_seconds(), "max": BUFFER_MIN * 60,
                   "video_id": youtube_id(rec.url)},
         jobs=js, clips=clips, subs_available=_has_whisper(), font=find_font()[1],
         cookies=COOKIES.exists(),
+        markers=markers[:30], logo=LOGO.exists(), social=social.status(),
+        public_base=public_base(), render_workers=RENDER_WORKERS,
         js_runtime=bool(shutil.which("deno") or any(shutil.which(r) for r in ("node", "bun", "quickjs"))))
 
 

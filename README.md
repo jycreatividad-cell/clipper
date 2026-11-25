@@ -50,6 +50,61 @@ python generar_plantillas.py --cat viral --texto "SE ARMÓ EL *LÍO* 😱" --enc
 ```
 Para crear categorías nuevas o cambiar colores/iconos por defecto, edita `CATS` en `templates.py`.
 
+## ⚡ Clips más rápido
+
+- **📍 Marcar momento (tecla `M`)**: mientras ves el directo, aprieta `M` cuando pase algo. Queda
+  guardado y luego lo conviertes en clip (con los segundos de "antes" y "después" que elijas).
+- **🔎 Buscar tomas importantes**: analiza los últimos 5–30 minutos del directo (o una captura) y
+  encuentra los picos de audio: gritos, discusiones, risas, aplausos. Las mejores (🔥🔥🔥) quedan
+  marcadas solas.
+- **🎬 Crear varios clips a la vez**: marca con ✔ los momentos y aprieta un botón: se capturan y
+  renderizan todos con la configuración del editor (hook, plantilla, formato, subtítulos, marca de
+  agua, portada). Se renderizan `RENDER_WORKERS` a la vez (2 por defecto) y el resto espera en cola.
+- **Velocidad "Rápido"** (por defecto) renderiza más ligero; "Máxima calidad" para clips especiales.
+
+## 🖼 Portada, 💬 subtítulos y 💧 marca de agua
+
+- **Portada**: elige un fotograma ("Usar fotograma actual") y escribe el texto. "Crear portada" saca un
+  JPG; "Poner la portada al inicio" la pega como primer cuadro del video (0.35 s), que es lo que
+  TikTok toma como portada, y se usa también como portada del Reel en Instagram.
+- **Subtítulos** palabra por palabra en 4 estilos (amarillo, verde, caja negra, blanco) y 3
+  posiciones. Necesitan `requirements-subtitulos.txt` (el Docker ya los trae).
+- **Marca de agua**: texto (@usuario) y/o logo (PNG transparente ideal), con posición, tamaño y
+  transparencia. Las posiciones de abajo dejan libre la zona de botones de TikTok/Reels.
+
+## 🚀 Publicar en redes desde Clipper
+
+Cada clip listo tiene:
+- **📲 Compartir**: en el celular abre el menú de compartir del teléfono → TikTok, Instagram,
+  Facebook, WhatsApp… (copia el copy al portapapeles). No necesita configurar nada.
+- **🚀 Publicar**: sube directo a tus cuentas conectadas.
+
+| Red | Cómo se publica |
+|---|---|
+| Facebook | Video en tu **página** (no perfil personal). |
+| Instagram | **Reel** en tu cuenta profesional vinculada a la página. Solo con la app en internet. |
+| TikTok | A tus **borradores** (terminas en la app de TikTok) o directo. Las apps de TikTok sin auditar solo pueden publicar en privado. |
+
+### Opción A — botones "Conectar" (recomendado)
+1. **Meta**: en [developers.facebook.com](https://developers.facebook.com) crea una app tipo
+   "Business", agrega *Facebook Login for Business* e *Instagram Graph API*, y registra la dirección
+   de retorno `https://TU-APP/oauth/meta/callback`.
+2. **TikTok**: en [developers.tiktok.com](https://developers.tiktok.com) crea una app con
+   *Login Kit* y *Content Posting API* (permisos `video.upload` y `video.publish`), con retorno
+   `https://TU-APP/oauth/tiktok/callback`.
+3. En Railway → Variables: `PUBLIC_URL=https://TU-APP`, `META_APP_ID`, `META_APP_SECRET`,
+   `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`.
+4. En Clipper → **Cuentas para publicar** → Conectar.
+
+### Opción B — pegar tokens
+- Facebook/Instagram: en el [Explorador de la Graph API](https://developers.facebook.com/tools/explorer)
+  genera un token de usuario con `pages_show_list, pages_manage_posts, pages_read_engagement,
+  instagram_basic, instagram_content_publish`, alárgalo en el *Depurador de tokens* ("Extender") y
+  consulta `me/accounts`: copia el `id` y el `access_token` de tu página.
+- TikTok: token de acceso de tu app de desarrollador.
+
+Los tokens se guardan en el servidor (`cuentas.json` dentro de `/data`) y nunca se muestran en la app.
+
 ## Opciones del editor
 - **Fondo desenfocado**: el video completo al centro y el mismo video borroso detrás.
 - **Pantalla completa (recorte)**: llena la pantalla; mueve "posición" para enfocar a la persona
@@ -114,6 +169,10 @@ Las cookies vencen cada cierto tiempo: si vuelve el error, súbelas de nuevo.
 | `DATA_DIR` | Carpeta de datos (en Docker ya es `/data`) |
 | `YT_COOKIES` | Alternativa a subir cookies: el contenido de cookies.txt |
 | `YT_PROXY` | Proxy para yt-dlp |
+| `RENDER_WORKERS` | Clips que se renderizan a la vez (2; súbelo si el servidor tiene más CPU) |
+| `PUBLIC_URL` | Dirección pública de la app (para Instagram y los botones Conectar) |
+| `META_APP_ID` / `META_APP_SECRET` | App de Meta para conectar Facebook/Instagram |
+| `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | App de TikTok para conectar TikTok |
 
 Subtítulos en servidor: el Docker los incluye con el modelo `base` (necesita ~2 GB de RAM).
 Para un plan más barato, construye sin ellos: `docker build --build-arg SUBTITULOS=0 .`
