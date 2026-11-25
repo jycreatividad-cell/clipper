@@ -1042,7 +1042,7 @@ def job_render(jid, opts):
     shutil.rmtree(work, ignore_errors=True)
     save_meta(rid, {"id": rid, "type": "final", "file": out.name, "created": time.time(),
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
-                    "cover": cover_file.name if cover_file else None,
+                    "cover": cover_file.name if cover_file else None, "cat": opts.get("hook_cat"),
                     "label": hook.replace("*", "")[:60] or src_meta.get("label") or f"Clip {fmt} {dur:.0f}s"})
     update_job(jid, result=rid)
     return rid

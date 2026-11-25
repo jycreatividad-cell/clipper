@@ -50,6 +50,15 @@ python generar_plantillas.py --cat viral --texto "SE ARMÓ EL *LÍO* 😱" --enc
 ```
 Para crear categorías nuevas o cambiar colores/iconos por defecto, edita `CATS` en `templates.py`.
 
+## 🏠 Hooks para La Casa de Alofoke
+
+En el editor, debajo del hook, hay **10 tipos de momento** con frases listas: 🔥 Pelea · 💘 Romance ·
+🗳️ Nominación · 🤫 Chisme · 😂 Risa · 🎙️ Reacción de Alofoke · 🐍 Traición · 🎉 Fiesta · 😢 Emotivo ·
+👀 Gancho. Al tocar una frase se pone sola la plantilla que mejor le va, y el copy y los hashtags se
+adaptan al tipo de momento. **🎲 Al azar** elige una frase. Al crear varios clips a la vez, cada uno
+puede llevar un hook distinto. Para agregar o cambiar frases, copys y hashtags, edita
+`static/alofoke.js`.
+
 ## 📱 Usarla en el iPhone (como app)
 
 1. Abre en **Safari** el link de tu app en Railway (ej. `https://clipper-production.up.railway.app`).
@@ -93,10 +102,14 @@ En el celular la app se organiza en pestañas abajo: **🔴 Directo · ✂️ Ed
 
 ## 🚀 Publicar en redes desde Clipper
 
-Cada clip listo tiene:
-- **📲 Compartir**: en el celular abre el menú de compartir del teléfono → TikTok, Instagram,
-  Facebook, WhatsApp… (copia el copy al portapapeles). No necesita configurar nada.
-- **🚀 Publicar**: sube directo a tus cuentas conectadas.
+Toca **🚀** en un clip y elige:
+- **Abrir en la app (TikTok, Instagram, Facebook, WhatsApp, Guardar video)**: se copia el copy con
+  los hashtags de esa red y se abre el menú de Compartir del iPhone con el video → tocas la app →
+  pegas el copy en la descripción. No necesita configurar nada. En computadora: se descarga el
+  video, se copia el copy y se abre la página de subida de esa red.
+  *(Apple no deja que una página web abra TikTok con el video ya puesto; por eso se elige la app en
+  el menú de Compartir, y el copy va copiado porque TikTok no recibe texto por ese camino.)*
+- **Publicar automático**: sube directo a tus cuentas conectadas, sin abrir las apps.
 
 | Red | Cómo se publica |
 |---|---|

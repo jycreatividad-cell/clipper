@@ -130,6 +130,20 @@
       background:#1d1d24;border:1px solid var(--line);border-radius:14px;padding:12px 40px 12px 14px;font-size:14px;box-shadow:0 10px 40px #000a}
     .install button{position:absolute;right:6px;top:6px;background:none;border:0;color:var(--mut);font-size:18px;min-height:0}
   }
+  .hookcats{display:flex;gap:6px;overflow-x:auto;padding:6px 0 2px;-webkit-overflow-scrolling:touch}
+  .hookcats button{flex:0 0 auto;font-size:13px;padding:6px 10px;border-radius:20px;white-space:nowrap}
+  .hookcats button.on{background:var(--yel);color:#111;border-color:var(--yel)}
+  #hookIdeas button{flex:0 0 auto;font-size:12px;padding:6px 9px;text-align:left}
+  .netbtns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+  .netbtns button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 4px;font-size:13px}
+  .netbtns button b{font-size:24px;line-height:1}
+  .netbtns .tt{background:#000;border-color:#25F4EE}
+  .netbtns .ig{background:linear-gradient(45deg,#f9a825,#e91e63,#7b1fa2);border:0}
+  .netbtns .fb{background:#1877F2;border:0}
+  .netbtns .wa{background:#1fa855;border:0}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom));z-index:30;
+    background:#22c55e;color:#04130a;font-weight:700;padding:12px 16px;border-radius:12px;max-width:92vw;box-shadow:0 10px 30px #000a;font-size:14px}
+  .modal>div{max-height:92vh;overflow:auto}
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
@@ -186,7 +200,8 @@
         <button id="momAll" style="flex:0 0 auto">Seleccionar todo</button>
         <button class="pri" id="momBatch">🎬 Crear clips seleccionados a la vez</button>
       </div>
-      <p class="mut" style="margin:6px 0 0">Usa la configuración del editor (hook, plantilla, formato, subtítulos, marca de agua, portada).</p>
+      <label class="chk mut"><input type="checkbox" id="randHooks" checked> Un hook distinto en cada clip (de la categoría elegida en el editor)</label>
+      <p class="mut" style="margin:2px 0 0">Usa la configuración del editor (plantilla, formato, subtítulos, marca de agua, portada).</p>
     </div>
     <details>
       <summary class="mut" style="cursor:pointer">Capturar de un video ya subido / repetición (por tiempo)</summary>
@@ -223,6 +238,7 @@
       <label class="f">Hook (texto arriba del video)</label>
       <textarea id="hook" placeholder="Ej: SE ARMÓ EL *LÍO* EN LA CASA 😱"></textarea>
       <p class="mut" style="margin:4px 0">Pon *entre asteriscos* las palabras que quieres resaltar en color. Los emojis salen a color.</p>
+      <div class="hookcats" id="hookCats"></div>
       <div class="row" style="margin-top:6px;flex-wrap:wrap" id="hookIdeas"></div>
 
       <label class="f">Estilo del hook</label>
@@ -374,9 +390,20 @@
 
 <div class="modal hidden" id="pubModal"><div>
   <h2 style="margin:0 0 10px;font-size:18px">🚀 Publicar clip</h2>
-  <video id="pubVideo" controls playsinline style="width:100%;max-height:260px;background:#000;border-radius:10px"></video>
-  <label class="f">Descripción / copy</label>
+  <video id="pubVideo" controls playsinline style="width:100%;max-height:min(260px,30vh);background:#000;border-radius:10px"></video>
+  <h3 style="font-size:14px;margin:10px 0 2px">📲 Abrir en la app <span class="mut" id="pubPrep"></span></h3>
+  <p class="mut" style="margin:0">Se copia el copy (con los hashtags de cada red) y se abre el video para enviarlo a la app. Allí solo pegas el copy.</p>
+  <div class="netbtns">
+    <button class="tt" data-net="tiktok"><b>🎵</b>TikTok</button>
+    <button class="ig" data-net="instagram"><b>📸</b>Instagram</button>
+    <button class="fb" data-net="facebook"><b>📘</b>Facebook</button>
+    <button class="wa" data-net="whatsapp"><b>💬</b>WhatsApp</button>
+    <button data-net="fotos"><b>⬇️</b>Guardar video</button>
+    <button data-net="copy"><b>📋</b>Solo copiar copy</button>
+  </div>
+  <label class="f">Copy <button type="button" id="pubNewCopy" style="padding:2px 8px;font-size:12px;min-height:0;margin-left:6px">🎲 Otro</button></label>
   <textarea id="pubCaption" rows="4"></textarea>
+  <h3 style="font-size:14px;margin:12px 0 2px">🤖 Publicar automático (cuentas conectadas)</h3>
   <label class="chk"><input type="checkbox" id="pubFb"> Facebook <span class="mut" id="pubFbN"></span></label>
   <label class="chk"><input type="checkbox" id="pubIg"> Instagram Reels <span class="mut" id="pubIgN"></span></label>
   <label class="chk"><input type="checkbox" id="pubTt"> TikTok <span class="mut" id="pubTtN"></span></label>
@@ -384,10 +411,10 @@
     <label><input type="radio" name="ttmode" value="inbox" checked><span>A borradores de TikTok</span></label>
     <label><input type="radio" name="ttmode" value="direct"><span>Publicar directo</span></label>
   </div>
-  <div class="row"><button id="pubCancel">Cancelar</button><button class="pri" id="pubGo">Publicar</button></div>
-  <p class="mut" style="margin-bottom:0">¿Sin cuentas conectadas? Usa 📲 Compartir desde el celular: abre TikTok, Instagram o Facebook directamente.</p>
+  <div class="row"><button id="pubCancel">Cerrar</button><button class="pri" id="pubGo">Publicar automático</button></div>
 </div></div>
 
+<script src="/static/alofoke.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const api = async (path, body, method) => {
@@ -404,9 +431,35 @@ const fmtLong = s => { s = Math.floor(s); const h = Math.floor(s/3600), m = Math
 
 let state = {}, current = null, inT = 0, outT = 0, lastVid = null, seenFinals = new Set(), seenCaps = new Set(), firstLoad = true;
 
-const HOOKS = ['SE ARMÓ EL *LÍO* 😱','*NADIE* ESPERABA ESTO 👀','SE DIJERON DE *TODO* 🔥','MIREN LO QUE PASÓ EN *LA CASA*','ESTO SE SALIÓ DE *CONTROL*','LA *REACCIÓN* DE TODOS 😂'];
-$('#hookIdeas').innerHTML = HOOKS.map(h => `<button type="button" style="flex:0 0 auto;font-size:12px;padding:5px 8px">${h}</button>`).join('');
-$('#hookIdeas').onclick = e => { if (e.target.tagName === 'BUTTON') { $('#hook').value = e.target.textContent; updPreview(true); } };
+// ---- hooks de La Casa de Alofoke (static/alofoke.js)
+const AF = window.ALOFOKE || {categorias: [], hashtags: {}};
+let hookCat = 'pelea';
+try { hookCat = localStorage.getItem('hookCat') || 'pelea'; } catch (e) {}
+const catInfo = id => AF.categorias.find(c => c.id === id) || AF.categorias[0];
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+function renderHookCats() {
+  $('#hookCats').innerHTML = AF.categorias.map(c => `<button type="button" data-cat="${c.id}" class="${c.id === hookCat ? 'on' : ''}">${c.emoji} ${c.nombre}</button>`).join('');
+  const c = catInfo(hookCat);
+  $('#hookIdeas').innerHTML = `<button type="button" data-rand="1">🎲 Al azar</button>` +
+    (c ? c.hooks.map(h => `<button type="button" data-hook="${h.replace(/"/g, '&quot;')}">${h}</button>`).join('') : '');
+}
+function useHook(h) {
+  $('#hook').value = h;
+  const c = catInfo(hookCat);
+  // si está en plantillas PRO, pone la plantilla que mejor va con este tipo de momento
+  if (c && c.tpl && document.querySelector('[name=sgroup]:checked').value === 'templates' && hookStyle !== c.tpl) {
+    hookStyle = c.tpl; try { localStorage.setItem('hookStyle', hookStyle); } catch (e) {}
+    $('#tplBadge').value = ''; $('#tplIcon').value = ''; $('#tplAccentAuto').checked = true; $('#tplNoBadge').checked = false;
+    if (typeof syncTplFields === 'function') syncTplFields();
+    document.querySelectorAll('#styles button').forEach(x => x.classList.toggle('sel', x.dataset.style === hookStyle));
+  }
+  updCaption(); updPreview(false);
+}
+$('#hookCats').onclick = e => { const b = e.target.closest('[data-cat]'); if (!b) return; hookCat = b.dataset.cat;
+  try { localStorage.setItem('hookCat', hookCat); } catch (x) {} renderHookCats(); updCaption(); };
+$('#hookIdeas').onclick = e => { const b = e.target.closest('button'); if (!b) return;
+  useHook(b.dataset.rand ? pick(catInfo(hookCat).hooks) : b.dataset.hook); };
+renderHookCats();
 
 // ---- estilos de hook con vista previa (plantillas PRO + estilos simples)
 let hookStyle = 't:viral';
@@ -485,9 +538,25 @@ $('#hook').addEventListener('input', () => updPreview(false));
 $('#hsize').addEventListener('input', () => updPreview(false));
 document.querySelectorAll('[name=hpos]').forEach(e => e.addEventListener('change', () => updPreview(false)));
 
-const CAPTION = '🔥 Lo que pasó hoy en La Casa de Alofoke 3 😱 ¿De qué lado estás? 👇\n#LaCasaDeAlofoke3 #Alofoke #LaCasaDeAlofoke #RD #Dominicana #viral #parati #fyp';
-$('#caption').textContent = CAPTION;
-$('#caption').onclick = () => { navigator.clipboard.writeText(CAPTION); $('#caption').style.color = 'var(--ok)'; setTimeout(() => $('#caption').style.color = '', 800); };
+// copy = frase de la categoría + hashtags de La Casa + hashtags de cada red
+function baseCaption(cat, hook) {
+  const c = catInfo(cat) || {copys: ['🔥 Lo que pasó hoy en La Casa de Alofoke 3 😱 ¿De qué lado estás? 👇']};
+  return pick(c.copys);
+}
+function withTags(text, net) {
+  const h = AF.hashtags || {};
+  const tags = [h.base, h[net]].filter(Boolean).join(' ');
+  const clean = text.replace(/\n*(#[^\s#]+\s*)+$/u, '').trim();  // quita hashtags viejos al final
+  return tags ? clean + '\n\n' + tags : clean;
+}
+let CAPTION = '';
+function updCaption() { CAPTION = withTags(baseCaption(hookCat), 'tiktok'); $('#caption').textContent = CAPTION; }
+updCaption();
+$('#caption').onclick = () => { navigator.clipboard.writeText(CAPTION); toast('✅ Copy copiado'); };
+function toast(msg, ms) {
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t);
+  setTimeout(() => t.remove(), ms || 3500);
+}
 
 try { $('#url').value = localStorage.getItem('url') || ''; $('#wm').value = localStorage.getItem('wm') || ''; } catch (e) {}
 
@@ -555,7 +624,7 @@ function getSettings() {
   return {
     format: radio('fmt'), mode: radio('mode'), pos: +$('#pos').value, zoom: +$('#zoom').value,
     hook: $('#hook').value, hook_style: hookStyle, hook_pos: hposSel(), hook_size: +$('#hsize').value, ...tplParams(),
-    watermark: $('#wm').value, wm_pos: $('#wmPos').value, wm_op: +$('#wmOp').value,
+    hook_cat: hookCat, watermark: $('#wm').value, wm_pos: $('#wmPos').value, wm_op: +$('#wmOp').value,
     logo: $('#logoOn').checked, logo_pos: $('#logoPos').value, logo_size: +$('#logoSize').value, logo_op: +$('#logoOp').value,
     subs: $('#subs').checked && !$('#subs').disabled, subs_style: radio('substyle'), subs_pos: radio('subpos'),
     cover_first: $('#coverOn').checked, cover_text: $('#coverText').value, speed: radio('speed'),
@@ -646,8 +715,12 @@ $('#moms').addEventListener('click', async e => {
 });
 $('#momAll').onclick = () => { const all = momentItems(); if (selected.size === all.length) selected.clear(); else all.forEach(i => selected.add(i.key)); renderMoments(true); };
 $('#momBatch').onclick = async () => {
-  const items = momentItems().filter(i => selected.has(i.key)).map(i => i.item);
+  const items = momentItems().filter(i => selected.has(i.key)).map(i => ({...i.item}));
   if (!items.length) return alert('Marca con ✔ los momentos que quieres convertir en clips');
+  if ($('#randHooks').checked) {  // reparte frases distintas de la categoría
+    const pool = [...catInfo(hookCat).hooks].sort(() => Math.random() - 0.5);
+    items.forEach((it, i) => it.hook = pool[i % pool.length]);
+  }
   saveSettings();
   await api('/api/batch', {items, settings: getSettings()});
   selected.clear(); renderMoments(true); if (mobile()) goTab('clips'); refresh();
@@ -677,44 +750,86 @@ $('#btnFindCap').onclick = () => current && findMoments({clip_id: current.id});
 
 // ---- compartir / publicar
 const shareCache = new Map();
-async function shareClip(c, btn) {
-  navigator.clipboard && navigator.clipboard.writeText(CAPTION).catch(() => {});  // copy listo para pegar
-  try {
-    let file = shareCache.get(c.id);
-    if (!file) {
-      if (btn) btn.textContent = '⏳';
-      const blob = await (await fetch('/clips/' + c.file)).blob();
-      file = new File([blob], c.file, {type: 'video/mp4'});
-      shareCache.set(c.id, file);
-    }
-    if (!(navigator.canShare && navigator.canShare({files: [file]}))) {
-      location.href = '/clips/' + c.file + '?dl=1';
-      return alert('Tu navegador no permite compartir archivos: se descargó el video.');
-    }
-    await navigator.share({files: [file], text: CAPTION});
-    if (btn) btn.textContent = '📲';
-  } catch (e) {
-    if (e.name === 'NotAllowedError' && btn) { btn.textContent = '📲 Toca otra vez'; return; }  // iPhone: el permiso venció mientras se descargaba
-    if (btn) btn.textContent = '📲';
-    if (e.name !== 'AbortError') alert('No se pudo compartir: ' + e.message);
+async function clipFile(c) {
+  let file = shareCache.get(c.id);
+  if (!file) {
+    const blob = await (await fetch('/clips/' + c.file)).blob();
+    file = new File([blob], c.file, {type: 'video/mp4'});
+    shareCache.set(c.id, file);
   }
+  return file;
+}
+const canShareFiles = () => !!(navigator.canShare && navigator.share) &&
+  navigator.canShare({files: [new File([new Blob(['x'], {type: 'video/mp4'})], 'x.mp4', {type: 'video/mp4'})]});
+const NET = {
+  tiktok: {name: 'TikTok', web: 'https://www.tiktok.com/tiktokstudio/upload'},
+  instagram: {name: 'Instagram', web: 'https://www.instagram.com/'},
+  facebook: {name: 'Facebook', web: 'https://www.facebook.com/reels/create'},
+  whatsapp: {name: 'WhatsApp', web: 'https://web.whatsapp.com/'},
+};
+function download(c) {
+  const a = document.createElement('a'); a.href = '/clips/' + c.file + '?dl=1'; a.download = c.file;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+// net: tiktok | instagram | facebook | whatsapp | fotos | copy
+async function sendTo(c, net, captionText, btn) {
+  const caption = net === 'fotos' ? '' : withTags(captionText, net === 'copy' ? 'tiktok' : net);
+  if (caption && navigator.clipboard) navigator.clipboard.writeText(caption).catch(() => {});  // dentro del toque
+  if (net === 'copy') return toast('✅ Copy copiado');
+  if (!canShareFiles()) {  // computadora: bajar video + abrir la página de subida
+    download(c);
+    if (NET[net]) { window.open(NET[net].web, '_blank'); toast(`✅ Video descargado y copy copiado. Súbelo en ${NET[net].name} y pega el copy.`, 6000); }
+    else toast('✅ Video descargado');
+    return;
+  }
+  const old = btn ? btn.innerHTML : '';
+  try {
+    const ready = shareCache.has(c.id);
+    const file = await clipFile(c);
+    if (!ready && btn) { btn.innerHTML = '<b>👆</b>Toca otra vez'; return; }  // iPhone exige abrir el menú justo al tocar
+    await navigator.share({files: [file]});
+    if (NET[net]) toast(`✅ Copy copiado: en ${NET[net].name} pégalo en la descripción`, 6000);
+  } catch (e) {
+    if (e.name === 'NotAllowedError') { if (btn) btn.innerHTML = '<b>👆</b>Toca otra vez'; return; }
+    if (e.name !== 'AbortError') alert('No se pudo abrir: ' + e.message);
+  }
+  if (btn && old) btn.innerHTML = old;
+}
+async function shareClip(c, btn) {  // botón 📲 de cada clip
+  const t = btn.textContent;
+  if (!shareCache.has(c.id)) { btn.textContent = '⏳'; await clipFile(c).catch(() => {}); btn.textContent = '👆'; return toast('Listo: toca 📲 otra vez para compartir'); }
+  btn.textContent = t.startsWith('👆') ? '📲' : t;
+  sendTo(c, 'tiktok', c.caption || CAPTION, null);
 }
 let pubClip = null;
 function openPublish(c) {
   pubClip = c; const so = state.social || {};
   $('#pubVideo').src = '/clips/' + c.file;
-  $('#pubCaption').value = (c.hook ? c.hook.replace(/\*/g, '') + '\n\n' : '') + CAPTION;
+  c.caption = c.caption || baseCaption(c.cat || hookCat);
+  $('#pubCaption').value = c.caption;
   [['Fb', so.facebook, so.facebook_name], ['Ig', so.instagram, so.instagram_name && '@' + so.instagram_name], ['Tt', so.tiktok, so.tiktok_name]].forEach(([k, ok, name]) => {
     $('#pub' + k).disabled = !ok; $('#pub' + k).checked = !!ok;
     $('#pub' + k + 'N').textContent = ok ? (name || 'conectado') : '(no conectado)';
   });
+  document.querySelectorAll('.netbtns button').forEach(b => b.disabled = false);
+  if (canShareFiles() && !shareCache.has(c.id)) {  // prepara el video ya, para que el menú abra al primer toque
+    $('#pubPrep').textContent = '· preparando video…';
+    document.querySelectorAll('.netbtns button[data-net]:not([data-net=copy])').forEach(b => b.disabled = true);
+    clipFile(c).then(() => { $('#pubPrep').textContent = '· listo ✅'; document.querySelectorAll('.netbtns button').forEach(b => b.disabled = false); })
+      .catch(() => { $('#pubPrep').textContent = ''; document.querySelectorAll('.netbtns button').forEach(b => b.disabled = false); });
+  } else $('#pubPrep').textContent = '';
   $('#pubModal').classList.remove('hidden');
 }
+$('#pubCaption').addEventListener('input', () => { if (pubClip) pubClip.caption = $('#pubCaption').value; });
+$('#pubNewCopy').onclick = () => { if (!pubClip) return; pubClip.caption = baseCaption(pubClip.cat || hookCat); $('#pubCaption').value = pubClip.caption; };
+document.querySelector('.netbtns').addEventListener('click', e => {
+  const b = e.target.closest('[data-net]'); if (b && pubClip) sendTo(pubClip, b.dataset.net, $('#pubCaption').value, b);
+});
 $('#pubCancel').onclick = () => { $('#pubModal').classList.add('hidden'); $('#pubVideo').pause(); };
 $('#pubGo').onclick = async () => {
   const targets = [['facebook', '#pubFb'], ['instagram', '#pubIg'], ['tiktok', '#pubTt']].filter(([, id]) => $(id).checked).map(([t]) => t);
-  if (!targets.length) return alert('Elige al menos una red (o conecta tus cuentas)');
-  await api('/api/publish', {clip_id: pubClip.id, caption: $('#pubCaption').value, targets, tiktok_mode: radio('ttmode')});
+  if (!targets.length) return alert('Conecta tus cuentas en la pestaña 🚀 Cuentas para publicar automático, o usa los botones de arriba.');
+  for (const t of targets) await api('/api/publish', {clip_id: pubClip.id, caption: withTags($('#pubCaption').value, t), targets: [t], tiktok_mode: radio('ttmode')});
   $('#pubCancel').click(); refresh();
 };
 
@@ -796,7 +911,7 @@ function renderLists() {
       <div class="mut" style="padding:4px 6px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.label)}</div>
       <div class="a"><a class="btn" href="/clips/${c.file}?dl=1" title="Descargar">⬇</a>
         <button data-share="${c.id}" title="Compartir o Guardar en Fotos (TikTok, Instagram, Facebook…)">📲</button>
-        <button data-pub="${c.id}" title="Publicar en tus cuentas">🚀</button>
+        <button data-pub="${c.id}" title="Publicar en TikTok, Instagram, Facebook…">🚀</button>
         <button data-del="${c.id}" title="Borrar">🗑</button></div>
       ${c.cover ? `<div class="a" style="padding-top:0"><a class="btn" href="/clips/${c.cover}?dl=1">⬇ Portada</a></div>` : ''}
     </div>`).join('') : '<p class="mut">Aquí salen tus clips renderizados.</p>';
