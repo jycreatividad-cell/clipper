@@ -176,14 +176,26 @@
       <summary class="mut" style="cursor:pointer">🍪 Cookies de YouTube <span id="ckState"></span> — necesarias si YouTube dice "confirma que no eres un bot"</summary>
       <div class="ckhelp">
         <b>Por qué:</b> YouTube bloquea a los servidores en la nube. Con las cookies de una cuenta, el servidor entra como si fuera esa cuenta.
-        <ol>
-          <li>En una <b>computadora</b> (Chrome o Edge) instala la extensión <b>“Get cookies.txt LOCALLY”</b> (o “Cookie-Editor”).</li>
-          <li>Abre una <b>ventana de incógnito</b>, entra a <b>youtube.com</b> con una <b>cuenta secundaria</b> (no la principal).</li>
-          <li>Con youtube.com abierto, usa la extensión → <b>Export</b> (formato Netscape o JSON).</li>
-          <li><b>Cierra la ventana de incógnito</b> sin cerrar sesión (así las cookies duran más).</li>
-          <li>Sube el archivo aquí, o pega su contenido abajo. Puedes hacerlo desde la computadora entrando a este mismo link.</li>
+        <div class="seg" style="margin:8px 0 4px">
+          <label><input type="radio" name="ckhow" value="iphone" checked><span>📱 Desde el iPhone</span></label>
+          <label><input type="radio" name="ckhow" value="pc"><span>💻 Desde computadora</span></label>
+        </div>
+        <ol id="ckIphone">
+          <li>Instala la app gratis <b>“Cookie-Editor”</b> desde el App Store (es una extensión de Safari).</li>
+          <li>Ve a <b>Ajustes → Apps → Safari → Extensiones → Cookie-Editor</b>: actívala, pon <b>“Permitir”</b> en todos los sitios y activa <b>“Permitir en navegación privada”</b>.</li>
+          <li>Abre <b>Safari</b> en una <b>pestaña privada</b> y entra a <b>youtube.com</b> con una <b>cuenta secundaria</b> (no la principal).</li>
+          <li>Toca <b>aA</b> (o el ícono de pieza 🧩) en la barra de direcciones → <b>Cookie-Editor</b> → <b>Export</b> → <b>JSON</b>. Se copian solas.</li>
+          <li>Cierra la pestaña privada <b>sin cerrar sesión</b> (así duran más).</li>
+          <li>Vuelve aquí y toca <b>📋 Pegar del portapapeles</b> y luego <b>🔌 Probar conexión</b>.</li>
+        </ol>
+        <ol id="ckPc" class="hidden">
+          <li>En Chrome o Edge instala la extensión <b>“Get cookies.txt LOCALLY”</b> (o “Cookie-Editor”).</li>
+          <li>Abre una <b>ventana de incógnito</b> y entra a <b>youtube.com</b> con una <b>cuenta secundaria</b>.</li>
+          <li>Usa la extensión → <b>Export</b>. Cierra la ventana de incógnito sin cerrar sesión.</li>
+          <li>Entra a este mismo link en la computadora y sube el archivo aquí (o pega su contenido).</li>
         </ol>
       </div>
+      <button id="ckClip" class="pri" style="width:100%">📋 Pegar del portapapeles y guardar</button>
       <div class="row"><input type="file" id="ckFile" accept=".txt,.json,text/plain,application/json"><button id="ckUp" style="flex:0 0 auto">Subir archivo</button></div>
       <textarea id="ckText" rows="3" placeholder="…o pega aquí el contenido de cookies.txt / JSON" style="margin-top:8px"></textarea>
       <div class="row" style="margin-top:8px">
@@ -594,6 +606,21 @@ async function sendCookies(body) {
 }
 $('#ckUp').onclick = () => { const f = $('#ckFile').files[0]; if (!f) return alert('Elige el archivo'); const fd = new FormData(); fd.append('file', f); sendCookies(fd); };
 $('#ckFile').onchange = () => $('#ckUp').click();
+document.querySelectorAll('[name=ckhow]').forEach(r => r.onchange = () => {
+  const v = document.querySelector('[name=ckhow]:checked').value;
+  $('#ckIphone').classList.toggle('hidden', v !== 'iphone'); $('#ckPc').classList.toggle('hidden', v !== 'pc');
+});
+if (!/iP(hone|ad|od)|Android/.test(navigator.userAgent) && !matchMedia('(max-width: 980px)').matches) { document.querySelector('[name=ckhow][value=pc]').checked = true; $('#ckIphone').classList.add('hidden'); $('#ckPc').classList.remove('hidden'); }
+$('#ckClip').onclick = async () => {
+  let t = '';
+  try { t = await navigator.clipboard.readText(); } catch (e) {}
+  if (!t || !/youtube|SAPISID|LOGIN_INFO|PSID/i.test(t)) {
+    $('#ckText').focus();
+    return $('#ckMsg').textContent = t ? '❌ Lo copiado no parecen cookies de YouTube. Exporta en Cookie-Editor estando en youtube.com.'
+                                       : '👉 Mantén presionado en el cuadro de abajo → Pegar, y luego toca “Guardar lo pegado”.';
+  }
+  const fd = new FormData(); fd.append('text', t); sendCookies(fd);
+};
 $('#ckPaste').onclick = () => { const t = $('#ckText').value.trim(); if (!t) return alert('Pega primero el contenido'); const fd = new FormData(); fd.append('text', t); sendCookies(fd).then(() => $('#ckText').value = ''); };
 $('#ckTest').onclick = async () => {
   $('#ckMsg').textContent = '⏳ Probando con YouTube (puede tardar hasta 1 minuto)…';

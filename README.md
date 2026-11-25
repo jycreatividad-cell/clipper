@@ -187,6 +187,17 @@ docker build -t clipper .
 docker run -d --restart unless-stopped -p 80:8080 -v clipper-data:/data -e APP_PASSWORD=tuClave clipper
 ```
 
+### 🍪 Cookies desde el iPhone (sin computadora)
+1. Instala **Cookie-Editor** (extensión de Safari) desde el App Store.
+2. Ajustes → Apps → Safari → Extensiones → Cookie-Editor: actívala, "Permitir" en todos los sitios y
+   "Permitir en navegación privada".
+3. En Safari, pestaña privada → youtube.com → entra con una cuenta secundaria.
+4. **aA** → Cookie-Editor → Export → JSON (se copian). Cierra la pestaña privada sin cerrar sesión.
+5. En Clipper → 🍪 Cookies → **📋 Pegar del portapapeles** → **🔌 Probar conexión**.
+
+Si YouTube bloquea, la grabadora también prueba sola otros tipos de cliente (TV, Safari, móvil) y
+recuerda el que funcionó.
+
 ### ⚠️ Muy importante: YouTube bloquea servidores
 Desde servidores en la nube, YouTube suele responder *"Sign in to confirm you're not a bot"*.
 Solución: en la app abre **🍪 Cookies de YouTube** y sube un `cookies.txt` exportado con la

@@ -211,6 +211,14 @@ def to_netscape(text):
             lines.append("\t".join([dom, sub, c.get("path", "/"), "TRUE" if c.get("secure") else "FALSE",
                                     str(max(exp, 0)), c.get("name", ""), str(c.get("value", ""))]))
         return "\n".join(lines) + "\n"
+    first = t.splitlines()[0] if t else ""
+    if "\t" not in t and "=" in first and ";" in t:  # "Header String": a=1; b=2
+        lines = ["# Netscape HTTP Cookie File"]
+        for part in t.replace("\n", ";").split(";"):
+            if "=" in part:
+                k, _, v = part.strip().partition("=")
+                lines.append("\t".join([".youtube.com", "TRUE", "/", "TRUE", "2147483647", k.strip(), v.strip()]))
+        return "\n".join(lines) + "\n"
     if not t.startswith("#"):
         t = "# Netscape HTTP Cookie File\n" + t
     return t.replace("\r\n", "\n") + "\n"
@@ -244,13 +252,19 @@ def api_yt_test():
     url = ((request.get_json(silent=True) or {}).get("url") or rec.url or "").strip()
     if not url:
         return jsonify(error="Pega primero el link del directo"), 400
-    try:
-        p = subprocess.run(ytdlp() + ["--simulate", "--no-warnings", "-f", LIVE_FORMAT, "--print", "title", url],
-                           capture_output=True, text=True, timeout=90)
-    except subprocess.TimeoutExpired:
-        return jsonify(ok=False, message="YouTube no respondió a tiempo.")
-    if p.returncode == 0 and p.stdout.strip():
-        return jsonify(ok=True, message="✅ YouTube responde bien: " + p.stdout.strip().splitlines()[0][:100])
+    names = {"": "normal", "tv": "TV", "web_safari": "Safari", "mweb": "móvil"}
+    for client in [yt_state["client"]] + [c for c in PLAYER_CLIENTS if c != yt_state["client"]]:
+        try:
+            p = subprocess.run(ytdlp(client) + ["--simulate", "--no-warnings", "-f", LIVE_FORMAT, "--print", "title", url],
+                               capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            continue
+        if p.returncode == 0 and p.stdout.strip():
+            yt_state["client"] = client
+            extra = "" if not client else f" (entrando como cliente {names[client]})"
+            return jsonify(ok=True, message="✅ YouTube responde bien" + extra + ": " + p.stdout.strip().splitlines()[0][:100])
+        if "connect" in (p.stderr or "").lower() and "unable" in (p.stderr or "").lower():
+            break  # sin red: no tiene sentido probar los demás
     return jsonify(ok=False, message=clean_error(diagnose(url)))
 
 
@@ -274,8 +288,16 @@ def js_runtime_args():
     return []
 
 
-def ytdlp():
+# tipos de cliente de YouTube a probar si bloquea ("" = el normal de yt-dlp)
+PLAYER_CLIENTS = ["", "tv", "web_safari", "mweb"]
+yt_state = {"client": ""}  # el último que funcionó
+
+
+def ytdlp(client=None):
     cmd = [sys.executable, "-m", "yt_dlp", *js_runtime_args()]
+    client = yt_state["client"] if client is None else client
+    if client:
+        cmd += ["--extractor-args", f"youtube:player_client={client}"]
     if COOKIES.exists():
         cmd += ["--cookies", str(COOKIES)]
     if YT_PROXY:
@@ -498,8 +520,11 @@ class Recorder:
                                       stdin=subprocess.DEVNULL, stderr=log)
                 self.procs = [ff]
             else:
+                # si falla, el siguiente intento entra como otro tipo de cliente de YouTube
+                order = [yt_state["client"]] + [c for c in PLAYER_CLIENTS if c != yt_state["client"]]
+                client = order[fails % len(order)]
                 yt = subprocess.Popen(
-                    ytdlp() + ["-f", LIVE_FORMAT, "--no-part", "--quiet",
+                    ytdlp(client) + ["-f", LIVE_FORMAT, "--no-part", "--quiet",
                                "--no-warnings", "-o", "-", self.url],
                     stdout=subprocess.PIPE, stderr=log)
                 ff = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -512,6 +537,8 @@ class Recorder:
             if not self.running:
                 break
             # el directo se cortó o el link expiró: reintentar
+            if time.time() - t0 >= 30 and not is_local:
+                yt_state["client"] = client  # ese cliente sí funcionó
             fails = fails + 1 if time.time() - t0 < 30 else 0
             if fails >= 4:
                 self.error = ("No se pudo grabar el directo.\n" + diagnose(self.url) +
