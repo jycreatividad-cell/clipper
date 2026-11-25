@@ -59,6 +59,18 @@ adaptan al tipo de momento. **🎲 Al azar** elige una frase. Al crear varios cl
 puede llevar un hook distinto. Para agregar o cambiar frases, copys y hashtags, edita
 `static/alofoke.js`.
 
+### ✍️ Copys distintos para cada clip
+- **Generador automático (gratis):** arma el copy a partir del hook de cada clip, detecta el tipo de
+  momento por sus palabras (pelea, chisme, romance, risa…) y usa estructuras virales distintas
+  (pregunta polémica, "parte 2", etiqueta a alguien, mira hasta el final). Cada **🎲 Otro** da uno nuevo.
+  Las frases están en `static/alofoke.js` (`estructuras`, `cierres`, `palabras`).
+- **✨ Copy con IA (opcional):** escucha lo que se dice en el clip (si tienes los subtítulos
+  instalados) y Claude escribe 3 copys sobre ese momento concreto, en español dominicano. Para
+  activarlo, en Railway → Variables agrega `ANTHROPIC_API_KEY` (créala en console.anthropic.com).
+  Usa Claude Opus 5.5 con poco razonamiento para ir rápido (cambia el modelo con `COPY_MODEL`), y si
+  el modelo se niega a una petición la API la reintenta sola con otro modelo. Cada copy cuesta
+  centavos de dólar.
+
 ## 📱 Usarla en el iPhone (como app)
 
 1. Abre en **Safari** el link de tu app en Railway (ej. `https://clipper-production.up.railway.app`).
@@ -216,6 +228,8 @@ Las cookies vencen cada cierto tiempo: si vuelve el error, súbelas de nuevo.
 | `PUBLIC_URL` | Dirección pública de la app (para Instagram y los botones Conectar) |
 | `META_APP_ID` / `META_APP_SECRET` | App de Meta para conectar Facebook/Instagram |
 | `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | App de TikTok para conectar TikTok |
+| `ANTHROPIC_API_KEY` | Activa "✨ Copy con IA" |
+| `COPY_MODEL` | Modelo de Claude para los copys (por defecto `claude-opus-5-5`) |
 
 Subtítulos en servidor: el Docker los incluye con el modelo `base` (necesita ~2 GB de RAM).
 Para un plan más barato, construye sin ellos: `docker build --build-arg SUBTITULOS=0 .`

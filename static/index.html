@@ -194,6 +194,9 @@
       bottom:calc(62px + env(safe-area-inset-bottom));padding:8px 12px;background:#0d0d10e6;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--line)}
     body[data-tab=editor] .renderbar button{font-size:17px;padding:14px}
   }
+  .aiopts{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+  .aiopts button{text-align:left;font-size:13px;font-weight:500;padding:8px 10px;line-height:1.35}
+  .aiopts button.on{border-color:#a78bfa;background:#2e1a5c}
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
@@ -490,7 +493,9 @@
     <button data-net="fotos"><b>⬇️</b>Guardar video</button>
     <button data-net="copy"><b>📋</b>Solo copiar copy</button>
   </div>
-  <label class="f">Copy <button type="button" id="pubNewCopy" style="padding:2px 8px;font-size:12px;min-height:0;margin-left:6px">🎲 Otro</button></label>
+  <label class="f">Copy <button type="button" id="pubNewCopy" style="padding:2px 8px;font-size:12px;min-height:0;margin-left:6px">🎲 Otro</button>
+    <button type="button" id="pubAi" class="hidden" style="padding:2px 8px;font-size:12px;min-height:0;margin-left:4px;background:#5b21b6;border-color:#7c3aed">✨ Copy con IA</button></label>
+  <div id="aiOpts" class="aiopts"></div>
   <textarea id="pubCaption" rows="4"></textarea>
   <h3 style="font-size:14px;margin:12px 0 2px">🤖 Publicar automático (cuentas conectadas)</h3>
   <label class="chk"><input type="checkbox" id="pubFb"> Facebook <span class="mut" id="pubFbN"></span></label>
@@ -623,15 +628,47 @@ document.querySelectorAll('[name=sgroup]').forEach(e => e.addEventListener('chan
 ['#tplBadge', '#tplIcon', '#tplAccent', '#tplAccentAuto', '#tplPanel', '#tplNoBadge'].forEach(id =>
   $(id).addEventListener('input', () => { if (id === '#tplAccent') $('#tplAccentAuto').checked = false; updPreview(false); }));
 $('#tplSample').onclick = () => { const t = tplInfo(hookStyle); if (t) { $('#hook').value = t.sample; updPreview(true); } };
-$('#hook').addEventListener('input', () => updPreview(false));
+$('#hook').addEventListener('input', () => { updPreview(false); clearTimeout(window._capT); window._capT = setTimeout(updCaption, 600); });
 $('#hsize').addEventListener('input', () => updPreview(false));
 document.querySelectorAll('[name=hpos]').forEach(e => e.addEventListener('change', () => updPreview(false)));
 
 // copy = frase de la categoría + hashtags de La Casa + hashtags de cada red
-function baseCaption(cat, hook) {
-  const c = catInfo(cat) || {copys: ['🔥 Lo que pasó hoy en La Casa de Alofoke 3 😱 ¿De qué lado estás? 👇']};
-  return pick(c.copys);
+// copy distinto según el hook y el tipo de momento
+function hookPlain(h) {
+  let t = (h || '').replace(/\*/g, '').replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0F\u200D]/gu, '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  t = t.toLowerCase().replace(/(^|[.!?¡¿]\s*)([a-záéíóúñ])/g, (m, a, b) => a + b.toUpperCase());
+  return t.replace(/\balofoke\b/gi, 'Alofoke').replace(/\brd\b/gi, 'RD').replace(/^[¿¡\s]+|[?!.\s]+$/g, '');
 }
+function guessCat(h) {
+  const low = (h || '').toLowerCase();
+  for (const [cat, words] of Object.entries(AF.palabras || {})) if (words.some(w => low.includes(w))) return cat;
+  return null;
+}
+const recentCopies = [];
+const bigWords = t => new Set((t.toLowerCase().match(/[a-záéíóúñ]{5,}/g) || []));
+function smartCopy(hook, cat) {
+  const h = hookPlain(hook);
+  const k = guessCat(hook) || cat || hookCat;
+  const c = catInfo(k) || {copys: ['🔥 Lo que pasó hoy en La Casa de Alofoke 3 😱 ¿De qué lado estás? 👇']};
+  const hw = bigWords(h);
+  // estructuras que van con este tipo de momento y no repiten palabras del hook
+  const pool = (AF.estructuras || []).filter(e => (!e.c || e.c.includes(k)) &&
+    ![...bigWords(e.t.replace('{h}', ''))].some(w => hw.has(w)));
+  let out = '';
+  for (let i = 0; i < 12 && (!out || recentCopies.includes(out)); i++) {
+    if (!h || !pool.length || Math.random() < 0.2) { out = pick(c.copys); continue; }
+    out = pick(pool).t.replace('{h}', h);
+    const cierres = (AF.cierres || {})[k];
+    if (cierres && !out.includes('?') && Math.random() < 0.6) {
+      if (/[a-záéíóúñ0-9]$/i.test(out)) out += '.';
+      out += ' ' + pick(cierres);
+    }
+  }
+  recentCopies.push(out); if (recentCopies.length > 5) recentCopies.shift();
+  return out;
+}
+function baseCaption(cat, hook) { return smartCopy(hook !== undefined ? hook : ($('#hook') ? $('#hook').value : ''), cat); }
 function withTags(text, net) {
   const h = AF.hashtags || {};
   const tags = [h.base, h[net]].filter(Boolean).join(' ');
@@ -639,7 +676,7 @@ function withTags(text, net) {
   return tags ? clean + '\n\n' + tags : clean;
 }
 let CAPTION = '';
-function updCaption() { CAPTION = withTags(baseCaption(hookCat), 'tiktok'); $('#caption').textContent = CAPTION; }
+function updCaption() { CAPTION = withTags(baseCaption(hookCat, $('#hook') ? $('#hook').value : ''), 'tiktok'); $('#caption').textContent = CAPTION; }
 updCaption();
 $('#caption').onclick = () => { navigator.clipboard.writeText(CAPTION); toast('✅ Copy copiado'); };
 function toast(msg, ms) {
@@ -982,7 +1019,8 @@ let pubClip = null;
 function openPublish(c) {
   pubClip = c; const so = state.social || {};
   $('#pubVideo').src = '/clips/' + c.file;
-  c.caption = c.caption || baseCaption(c.cat || hookCat);
+  c.caption = c.caption || smartCopy(c.hook, c.cat);
+  $('#pubAi').classList.toggle('hidden', !state.ai); $('#aiOpts').innerHTML = '';
   $('#pubCaption').value = c.caption;
   [['Fb', so.facebook, so.facebook_name], ['Ig', so.instagram, so.instagram_name && '@' + so.instagram_name], ['Tt', so.tiktok, so.tiktok_name]].forEach(([k, ok, name]) => {
     $('#pub' + k).disabled = !ok; $('#pub' + k).checked = !!ok;
@@ -998,7 +1036,27 @@ function openPublish(c) {
   $('#pubModal').classList.remove('hidden');
 }
 $('#pubCaption').addEventListener('input', () => { if (pubClip) pubClip.caption = $('#pubCaption').value; });
-$('#pubNewCopy').onclick = () => { if (!pubClip) return; pubClip.caption = baseCaption(pubClip.cat || hookCat); $('#pubCaption').value = pubClip.caption; };
+$('#pubNewCopy').onclick = () => { if (!pubClip) return; pubClip.caption = smartCopy(pubClip.hook, pubClip.cat); $('#pubCaption').value = pubClip.caption; };
+$('#pubAi').onclick = async () => {
+  if (!pubClip) return;
+  const b = $('#pubAi'); b.disabled = true; b.textContent = '✨ Escribiendo…';
+  try {
+    const {job} = await api('/api/copy-ai', {clip_id: pubClip.id, hook: pubClip.hook, cat: pubClip.cat});
+    for (let i = 0; i < 240; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const j = await api('/api/job/' + job);
+      if (j.status === 'trabajando') { b.textContent = '✨ ' + j.label.replace(/…$/, '') + '…'; continue; }
+      if (j.status === 'error') { alert(j.error); break; }
+      const copys = (j.result || {}).copys || [];
+      $('#aiOpts').innerHTML = copys.map((c, k) => `<button type="button" data-ai="${k}">${c.replace(/</g, '&lt;')}</button>`).join('');
+      $('#aiOpts').onclick = e => { const x = e.target.closest('[data-ai]'); if (!x) return; pubClip.caption = copys[+x.dataset.ai]; $('#pubCaption').value = pubClip.caption;
+        document.querySelectorAll('#aiOpts button').forEach(y => y.classList.toggle('on', y === x)); };
+      if (copys[0]) { pubClip.caption = copys[0]; $('#pubCaption').value = copys[0]; $('#aiOpts button').classList.add('on'); }
+      break;
+    }
+  } catch (e) {}
+  b.disabled = false; b.textContent = '✨ Copy con IA';
+};
 document.querySelector('.netbtns').addEventListener('click', e => {
   const b = e.target.closest('[data-net]'); if (b && pubClip) sendTo(pubClip, b.dataset.net, $('#pubCaption').value, b);
 });

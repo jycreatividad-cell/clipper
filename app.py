@@ -1045,6 +1045,7 @@ def job_render(jid, opts):
         run_ffmpeg(["-ss", f"{t_in:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
                     "-vn", "-ac", "1", "-ar", "16000", str(wav)])
         words = transcribe_words(wav)
+        opts["_transcript"] = " ".join(w[2] for w in words)
         if words:
             build_ass(words, W, H, sub_family, work / "subs.ass",
                       style=opts.get("subs_style", "amarillo"), pos=opts.get("subs_pos", "abajo"))
@@ -1121,6 +1122,7 @@ def job_render(jid, opts):
     save_meta(rid, {"id": rid, "type": "final", "file": out.name, "created": time.time(),
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
                     "cover": cover_file.name if cover_file else None, "cat": opts.get("hook_cat"),
+                    "transcript": opts.get("_transcript"),
                     "label": hook.replace("*", "")[:60] or src_meta.get("label") or f"Clip {fmt} {dur:.0f}s"})
     update_job(jid, result=rid)
     return rid
@@ -1504,6 +1506,104 @@ def api_cuentas_delete(net):
     return jsonify(social.status())
 
 
+# ---- copys con IA (opcional): Claude escribe copys a partir del hook y de lo que se dice en el clip
+COPY_MODEL = os.environ.get("COPY_MODEL", "claude-opus-5-5")
+COPY_SYSTEM = """Eres el community manager de una página de clips virales de "La Casa de Alofoke 3", un reality show
+dominicano que se transmite en vivo por YouTube. Escribes copys (descripciones) para TikTok, Instagram Reels y Facebook.
+
+Reglas:
+- Español dominicano natural, cercano, con jerga ligera cuando quede bien (tiguere, dique, ¡qué lo qué!, ta' duro).
+- Cada copy: 1 o 2 frases cortas, máximo 160 caracteres, con 1 a 3 emojis.
+- Termina con una pregunta o un llamado a comentar, etiquetar o pedir parte 2.
+- Basa el copy en lo que realmente pasa en el clip (transcripción y hook). No inventes nombres, hechos ni frases que no estén ahí.
+- Nada de insultos, burlas a personas reales, contenido sexual ni acusaciones. Polémica sí, difamación no.
+- Sin hashtags (la app los agrega aparte).
+- Los 3 copys deben ser distintos entre sí: uno con pregunta polémica, uno con gancho de curiosidad y uno gracioso o de "etiqueta a alguien"."""
+COPY_SCHEMA = {
+    "type": "object",
+    "properties": {"copys": {"type": "array", "items": {"type": "string"}}},
+    "required": ["copys"],
+    "additionalProperties": False,
+}
+
+
+def ai_available():
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        return False
+    try:
+        import anthropic  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def job_copy_ai(jid, d):
+    import anthropic
+    cid = d.get("clip_id", "")
+    meta = json.loads(meta_path(cid).read_text(encoding="utf-8")) if re.fullmatch(r"[A-Za-z0-9_]+", cid) and meta_path(cid).exists() else {}
+    transcript = meta.get("transcript") or ""
+    if not transcript and meta.get("file") and _has_whisper():
+        update_job(jid, label="Escuchando lo que se dice en el clip…", progress=10)
+        wav = TMP / f"copy_{jid}.wav"
+        run_ffmpeg(["-i", str(CLIPS / meta["file"]), "-vn", "-ac", "1", "-ar", "16000", "-t", "180", str(wav)])
+        try:
+            transcript = " ".join(w[2] for w in transcribe_words(wav))
+        finally:
+            wav.unlink(missing_ok=True)
+        meta["transcript"] = transcript
+        save_meta(cid, meta)
+    hook = (d.get("hook") or meta.get("hook") or "").replace("*", "").strip()
+    cat = d.get("cat") or meta.get("cat") or ""
+    update_job(jid, label="La IA está escribiendo copys…", progress=60)
+    prompt = (f"Tipo de momento: {cat or 'no indicado'}\n"
+              f"Hook en pantalla: {hook or '(sin hook)'}\n"
+              f"Duración del clip: {int(meta.get('duration') or 0)} segundos\n"
+              f"Lo que se dice en el clip (transcripción automática, puede tener errores):\n"
+              f"{transcript[:4000] or '(no hay transcripción: básate solo en el hook y el tipo de momento)'}\n\n"
+              "Escribe 3 copys virales para este clip.")
+    client = anthropic.Anthropic()
+    try:
+        resp = _copy_request(client, prompt)
+    except anthropic.AuthenticationError as e:
+        raise RuntimeError("La clave de Anthropic (ANTHROPIC_API_KEY) no es válida. Revísala en Railway.") from e
+    except anthropic.PermissionDeniedError as e:
+        raise RuntimeError("Tu clave de Anthropic no tiene permiso o no tiene saldo. Revisa tu cuenta en console.anthropic.com.") from e
+    except anthropic.RateLimitError as e:
+        raise RuntimeError("Demasiadas peticiones a la IA. Espera un minuto y vuelve a intentar.") from e
+    except anthropic.APIStatusError as e:
+        raise RuntimeError(f"La IA dio un error ({e.status_code}). Intenta otra vez en un momento.") from e
+    except anthropic.APIConnectionError as e:
+        raise RuntimeError("El servidor no pudo conectarse con la IA. Revisa la conexión.") from e
+    if resp.stop_reason == "refusal":
+        raise RuntimeError("La IA no quiso escribir sobre este clip. Usa el generador 🎲.")
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    copys = [c.strip() for c in json.loads(text).get("copys", []) if c.strip()][:5]
+    if not copys:
+        raise RuntimeError("La IA no devolvió copys. Intenta otra vez.")
+    update_job(jid, label="Copys listos ✨", result={"copys": copys, "transcribed": bool(transcript)})
+
+
+def _copy_request(client, prompt):
+    return client.beta.messages.create(
+        model=COPY_MODEL,
+        max_tokens=2000,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",                      # si el modelo rechaza, la API reintenta con otro
+        output_config={"effort": "low", "format": {"type": "json_schema", "schema": COPY_SCHEMA}},
+        system=COPY_SYSTEM,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+
+@app.post("/api/copy-ai")
+def api_copy_ai():
+    if not ai_available():
+        return jsonify(error="La IA no está configurada: agrega ANTHROPIC_API_KEY en Railway (ver README)."), 400
+    jid = new_job("copy", "Escribiendo copys con IA…")
+    run_job(jid, job_copy_ai, request.json or {})
+    return jsonify(job=jid)
+
+
 @app.post("/api/publish")
 def api_publish():
     d = request.json or {}
@@ -1559,7 +1659,7 @@ def api_status():
         jobs=js, clips=clips, subs_available=_has_whisper(), font=find_font()[1],
         cookies=COOKIES.exists(),
         markers=markers[:30], logo=LOGO.exists(), social=social.status(),
-        public_base=public_base(), render_workers=RENDER_WORKERS,
+        public_base=public_base(), render_workers=RENDER_WORKERS, ai=ai_available(),
         js_runtime=bool(shutil.which("deno") or any(shutil.which(r) for r in ("node", "bun", "quickjs"))))
 
 

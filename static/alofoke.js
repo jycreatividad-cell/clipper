@@ -9,6 +9,53 @@ window.ALOFOKE = {
     facebook: '#viral #videosvirales',
     whatsapp: '',
   },
+  // Estructuras virales para armar copys con el hook ({h} = el hook en texto normal)
+  // c = tipos de momento donde queda bien (sin c = sirve para todos)
+  estructuras: [
+    {t: '{h} 😱 ¿Quién tiene la razón? Te leo 👇', c: ['pelea', 'alofoke', 'estrategia']},
+    {t: '{h}… y nadie se lo esperaba 👀 Comenta qué opinas 👇', c: ['pelea', 'chisme', 'nominacion', 'estrategia', 'romance', 'alofoke']},
+    {t: 'No puedo creer esto: {h} 😳 ¿Tú qué hubieras hecho?', c: ['pelea', 'chisme', 'estrategia', 'alofoke', 'nominacion']},
+    {t: 'Parte 1 👀 {h}. ¿Quieres la parte 2? Comenta "SÍ" 🔥'},
+    {t: 'Etiqueta a ese amigo que tiene que ver esto 😂 {h}', c: ['risa', 'fiesta', 'romance', 'gancho']},
+    {t: '{h} 🔥 Solo en La Casa de Alofoke 3 pasan estas cosas', c: ['pelea', 'risa', 'fiesta', 'chisme', 'gancho', 'alofoke']},
+    {t: '¿Esto fue en serio? 😳 {h}. Dime en los comentarios 👇', c: ['pelea', 'chisme', 'estrategia', 'nominacion', 'alofoke']},
+    {t: 'Lo que pasó hoy en La Casa: {h} 😱', c: ['pelea', 'chisme', 'estrategia', 'nominacion', 'alofoke', 'gancho', 'romance']},
+    {t: 'Mira hasta el final 👀 {h}'},
+    {t: '{h} 😂 No puedo parar de verlo', c: ['risa', 'fiesta']},
+    {t: 'Ta\' duro esto 🔥 {h}. ¿Lo viste en vivo?', c: ['pelea', 'fiesta', 'alofoke', 'gancho', 'estrategia']},
+    {t: '{h} ❤️ Este momento nos tocó a todos', c: ['emotivo']},
+    {t: '{h} 💘 Aquí hay novela', c: ['romance']},
+    {t: '{h} 🗳️ Esto cambia todo en la casa', c: ['nominacion']},
+    {t: '☕ {h}. El chisme está bueno', c: ['chisme']},
+    {t: '{h} 🎙️ Alofoke no se quedó callado', c: ['alofoke']},
+    {t: '{h} 🐍 Ya no se puede confiar en nadie en esa casa', c: ['estrategia']},
+    {t: '{h} 🎉 La casa está encendida', c: ['fiesta']},
+  ],
+  // Cierres según el tipo de momento
+  cierres: {
+    pelea: ['¿Team quién? 👇', '¿Quién se pasó? 👇', '¿Tú le hubieras contestado? 😤'],
+    romance: ['¿Los shippeas o no? 💘', '¿Amor o estrategia? 🤔', 'Ya hay novela 👀💘'],
+    nominacion: ['¿Quién se va? 🗳️', '¿Fue justo? 👇', 'Vota en los comentarios 👇'],
+    chisme: ['☕👀 ¿Tú le crees?', 'El chisme está bueno ☕', '¿Qué opinas? 👀'],
+    risa: ['😂😂😂', 'Me muero 🤣', 'Etiqueta a alguien 😂'],
+    alofoke: ['¿Alofoke tiene razón? 🎙️', '¿Estás de acuerdo con Alofoke? 👇'],
+    estrategia: ['¿Estrategia o traición? 🐍', '¿Quién está jugando sucio? 🤔'],
+    fiesta: ['¿Quién lo hizo mejor? 💃', '¡Qué lo qué! 🎉'],
+    emotivo: ['❤️', '¿Te tocó a ti también? 😢'],
+    gancho: ['¿Lo viste en vivo? 👀', 'Comenta si quieres más 🔥'],
+  },
+  // Palabras del hook que delatan el tipo de momento (si no eliges categoría)
+  palabras: {
+    pelea: ['lío', 'lio', 'pelea', 'discusión', 'discusion', 'dijeron', 'control', 'prendió', 'razón', 'duro', 'grito'],
+    romance: ['amor', 'pareja', 'beso', 'celos', 'novela', 'amistad', 'mirada', 'novio', 'novia'],
+    nominacion: ['nominación', 'nominacion', 'eliminación', 'eliminacion', 'votos', 'se va', 'expuls'],
+    chisme: ['confes', 'chisme', 'escapó', 'verdad', 'secreto', 'dique'],
+    risa: ['risa', 'gracioso', 'jaja', 'tiguer', 'aburrido', '😂', '🤣'],
+    alofoke: ['alofoke'],
+    estrategia: ['traición', 'traicion', 'alianza', 'sucio', 'jugada', 'espalda'],
+    fiesta: ['fiesta', 'reto', 'baile', 'bailando', 'viral'],
+    emotivo: ['lágrimas', 'lagrimas', 'emotivo', 'corazón', 'llor'],
+  },
   categorias: [
     {id: 'pelea', nombre: 'Pelea / Discusión', emoji: '🔥', tpl: 't:polemica',
       hooks: [
