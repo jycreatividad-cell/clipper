@@ -144,6 +144,10 @@
   .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom));z-index:30;
     background:#22c55e;color:#04130a;font-weight:700;padding:12px 16px;border-radius:12px;max-width:92vw;box-shadow:0 10px 30px #000a;font-size:14px}
   .modal>div{max-height:92vh;overflow:auto}
+  .ckhelp{background:#121217;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--mut);margin:8px 0}
+  .ckhelp ol{margin:6px 0 0;padding-left:20px}
+  .ckhelp li{margin:3px 0}
+  .ckhelp b{color:var(--txt)}
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
@@ -168,10 +172,26 @@
     <p class="mut" id="recState" style="margin:10px 0 0"><span class="dot"></span>Sin grabar</p>
     <div class="bar"><i id="bufBar"></i></div>
     <div id="recErr" class="err hidden"></div>
-    <details style="margin-top:10px">
-      <summary class="mut" style="cursor:pointer">🍪 Cookies de YouTube <span id="ckState"></span> — necesarias si YouTube pide "confirmar que no eres un bot"</summary>
-      <p class="mut">Exporta <b>cookies.txt</b> de youtube.com con la extensión "Get cookies.txt LOCALLY" (Chrome/Firefox), usando una cuenta secundaria, y súbelo aquí.</p>
-      <div class="row"><input type="file" id="ckFile" accept=".txt"><button id="ckUp">Subir</button><button id="ckDel">Quitar</button></div>
+    <details style="margin-top:10px" id="ckBox">
+      <summary class="mut" style="cursor:pointer">🍪 Cookies de YouTube <span id="ckState"></span> — necesarias si YouTube dice "confirma que no eres un bot"</summary>
+      <div class="ckhelp">
+        <b>Por qué:</b> YouTube bloquea a los servidores en la nube. Con las cookies de una cuenta, el servidor entra como si fuera esa cuenta.
+        <ol>
+          <li>En una <b>computadora</b> (Chrome o Edge) instala la extensión <b>“Get cookies.txt LOCALLY”</b> (o “Cookie-Editor”).</li>
+          <li>Abre una <b>ventana de incógnito</b>, entra a <b>youtube.com</b> con una <b>cuenta secundaria</b> (no la principal).</li>
+          <li>Con youtube.com abierto, usa la extensión → <b>Export</b> (formato Netscape o JSON).</li>
+          <li><b>Cierra la ventana de incógnito</b> sin cerrar sesión (así las cookies duran más).</li>
+          <li>Sube el archivo aquí, o pega su contenido abajo. Puedes hacerlo desde la computadora entrando a este mismo link.</li>
+        </ol>
+      </div>
+      <div class="row"><input type="file" id="ckFile" accept=".txt,.json,text/plain,application/json"><button id="ckUp" style="flex:0 0 auto">Subir archivo</button></div>
+      <textarea id="ckText" rows="3" placeholder="…o pega aquí el contenido de cookies.txt / JSON" style="margin-top:8px"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="ckPaste">Guardar lo pegado</button>
+        <button id="ckTest" class="pri">🔌 Probar conexión con YouTube</button>
+        <button id="ckDel" style="flex:0 0 auto">Quitar</button>
+      </div>
+      <div id="ckMsg" class="mut" style="margin-top:8px;white-space:pre-wrap"></div>
     </details>
     <div class="player" id="player" style="margin-top:12px">El directo aparecerá aquí</div>
   </div>
@@ -567,11 +587,17 @@ $('#btnStart').onclick = async () => {
 };
 $('#btnStop').onclick = async () => { await api('/api/buffer/stop', {}); refresh(); };
 
-$('#ckUp').onclick = async () => {
-  const f = $('#ckFile').files[0]; if (!f) return alert('Elige el archivo cookies.txt');
-  const fd = new FormData(); fd.append('file', f);
-  const r = await fetch('/api/cookies', {method: 'POST', body: fd}); const j = await r.json();
-  alert(r.ok ? 'Cookies guardadas ✅' : j.error); refresh();
+async function sendCookies(body) {
+  const r = await fetch('/api/cookies', {method: 'POST', body}); const j = await r.json().catch(() => ({}));
+  $('#ckMsg').textContent = r.ok ? `✅ Cookies guardadas (${j.count} de YouTube).` + (j.warning ? '\n⚠ ' + j.warning : '\nAhora toca “Probar conexión”.') : '❌ ' + (j.error || 'Error');
+  refresh();
+}
+$('#ckUp').onclick = () => { const f = $('#ckFile').files[0]; if (!f) return alert('Elige el archivo'); const fd = new FormData(); fd.append('file', f); sendCookies(fd); };
+$('#ckFile').onchange = () => $('#ckUp').click();
+$('#ckPaste').onclick = () => { const t = $('#ckText').value.trim(); if (!t) return alert('Pega primero el contenido'); const fd = new FormData(); fd.append('text', t); sendCookies(fd).then(() => $('#ckText').value = ''); };
+$('#ckTest').onclick = async () => {
+  $('#ckMsg').textContent = '⏳ Probando con YouTube (puede tardar hasta 1 minuto)…';
+  try { const j = await api('/api/yt-test', {url: $('#url').value.trim()}); $('#ckMsg').textContent = j.message; } catch (e) { $('#ckMsg').textContent = ''; }
 };
 $('#ckDel').onclick = async () => { await api('/api/cookies', null, 'DELETE'); refresh(); };
 
@@ -875,7 +901,7 @@ function goTab(t) {
   try { localStorage.setItem('tab', t); } catch (e) {}
   if (mobile()) window.scrollTo({top: 0});
 }
-let newClips = 0;
+let newClips = 0, ckOpened = false;
 document.querySelectorAll('.tabbar button').forEach(b => b.onclick = () => goTab(b.dataset.go));
 try { goTab(localStorage.getItem('tab') || 'directo'); } catch (e) { goTab('directo'); }
 $('#fabMark').onclick = () => { if (navigator.vibrate) navigator.vibrate(30); markNow(); flash('#fabMark', '✅'); };
@@ -933,6 +959,7 @@ async function refresh() {
   $('#bufBar').style.width = Math.min(100, r.buffer / r.max * 100) + '%';
   const warn = state.js_runtime ? '' : '⚠ Falta Deno (motor de JavaScript): sin él YouTube no entrega el video. Windows: winget install DenoLand.Deno y reinicia la app.\n\n';
   $('#recErr').classList.toggle('hidden', !r.error && !warn); $('#recErr').textContent = warn + (r.error || '');
+  if (r.error && /bot|cookies/i.test(r.error) && !ckOpened) { ckOpened = true; $('#ckBox').open = true; }
   document.querySelectorAll('[data-cap]').forEach(b => b.disabled = !r.buffer);
   if (r.video_id && r.video_id !== lastVid) {
     lastVid = r.video_id;

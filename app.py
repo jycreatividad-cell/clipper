@@ -191,16 +191,67 @@ def healthz():
     return "ok"
 
 
+LOGIN_COOKIES = ("SAPISID", "__Secure-3PSID", "__Secure-1PSID", "SID", "LOGIN_INFO", "__Secure-3PAPISID")
+
+
+def to_netscape(text):
+    """Acepta cookies.txt (Netscape) o JSON de Cookie-Editor / EditThisCookie y devuelve Netscape."""
+    t = text.strip().lstrip("\ufeff")
+    if t.startswith("[") or t.startswith("{"):
+        data = json.loads(t)
+        if isinstance(data, dict):
+            data = data.get("cookies", [])
+        lines = ["# Netscape HTTP Cookie File"]
+        for c in data:
+            dom = c.get("domain", "")
+            if not dom:
+                continue
+            exp = int(float(c.get("expirationDate") or c.get("expires") or 0))
+            sub = "TRUE" if dom.startswith(".") else "FALSE"
+            lines.append("\t".join([dom, sub, c.get("path", "/"), "TRUE" if c.get("secure") else "FALSE",
+                                    str(max(exp, 0)), c.get("name", ""), str(c.get("value", ""))]))
+        return "\n".join(lines) + "\n"
+    if not t.startswith("#"):
+        t = "# Netscape HTTP Cookie File\n" + t
+    return t.replace("\r\n", "\n") + "\n"
+
+
 @app.post("/api/cookies")
 def api_cookies():
     f = request.files.get("file")
-    if not f:
-        return jsonify(error="Sube el archivo cookies.txt"), 400
-    data = f.read().decode("utf-8", errors="replace")
-    if "youtube.com" not in data:
-        return jsonify(error="Ese archivo no tiene cookies de youtube.com"), 400
+    raw = f.read().decode("utf-8", errors="replace") if f else (request.form.get("text") or
+                                                                 (request.get_json(silent=True) or {}).get("text", ""))
+    if not raw.strip():
+        return jsonify(error="Sube el archivo cookies.txt o pega su contenido"), 400
+    try:
+        data = to_netscape(raw)
+    except (ValueError, TypeError, AttributeError):
+        return jsonify(error="No entiendo ese formato. Usa cookies.txt (Netscape) o el JSON de Cookie-Editor."), 400
+    yt = [ln for ln in data.splitlines() if "youtube.com" in ln and not ln.startswith("#")]
+    if not yt:
+        return jsonify(error="Esas cookies no son de youtube.com. Exporta estando en youtube.com."), 400
+    names = {ln.split("\t")[5] for ln in yt if len(ln.split("\t")) >= 7}
     COOKIES.write_text(data, encoding="utf-8")
-    return jsonify(ok=True)
+    logged = any(n in names for n in LOGIN_COOKIES)
+    return jsonify(ok=True, count=len(yt), logged=logged,
+                   warning=None if logged else "Ojo: no veo la sesión iniciada en esas cookies. Entra a YouTube con tu "
+                                                "cuenta secundaria antes de exportarlas.")
+
+
+@app.post("/api/yt-test")
+def api_yt_test():
+    """Prueba si el servidor puede leer el video de YouTube con las cookies actuales."""
+    url = ((request.get_json(silent=True) or {}).get("url") or rec.url or "").strip()
+    if not url:
+        return jsonify(error="Pega primero el link del directo"), 400
+    try:
+        p = subprocess.run(ytdlp() + ["--simulate", "--no-warnings", "-f", LIVE_FORMAT, "--print", "title", url],
+                           capture_output=True, text=True, timeout=90)
+    except subprocess.TimeoutExpired:
+        return jsonify(ok=False, message="YouTube no respondió a tiempo.")
+    if p.returncode == 0 and p.stdout.strip():
+        return jsonify(ok=True, message="✅ YouTube responde bien: " + p.stdout.strip().splitlines()[0][:100])
+    return jsonify(ok=False, message=clean_error(diagnose(url)))
 
 
 @app.delete("/api/cookies")
