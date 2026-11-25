@@ -50,6 +50,25 @@ python generar_plantillas.py --cat viral --texto "SE ARMÓ EL *LÍO* 😱" --enc
 ```
 Para crear categorías nuevas o cambiar colores/iconos por defecto, edita `CATS` en `templates.py`.
 
+## 📱 Usarla en el iPhone (como app)
+
+1. Abre en **Safari** el link de tu app en Railway (ej. `https://clipper-production.up.railway.app`).
+2. Entra con tu contraseña (`APP_PASSWORD`). El iPhone puede guardarla en el llavero.
+3. Toca **Compartir** (cuadrito con flecha ⬆️) → **“Agregar a pantalla de inicio”** → Agregar.
+4. Ábrela desde el icono ✂️: se ve a pantalla completa, sin barra de Safari, y la sesión queda
+   recordada (180 días).
+
+En el celular la app se organiza en pestañas abajo: **🔴 Directo · ✂️ Editor · 🎬 Clips · 🚀 Cuentas**.
+- Mientras graba, el botón amarillo **📍** marca el momento con un toque.
+- Al capturar, salta solo al Editor; al renderizar, salta a Clips (con un número cuando hay nuevos).
+- En cada clip, **📲** abre el menú de Compartir del iPhone: **Guardar video** (va a Fotos), TikTok,
+  Instagram, WhatsApp… El copy queda copiado para pegarlo. Si dice “Toca otra vez”, tócalo de nuevo
+  (el iPhone pide que el menú se abra justo al tocar).
+
+> La app necesita estar en internet (Railway/Render) para usarla desde el iPhone. Si la corres en tu
+> PC, puedes abrirla desde el iPhone en la misma red Wi-Fi con `HOST=0.0.0.0` y la IP de la PC
+> (ej. `http://192.168.1.20:5055`), pero así no se puede instalar a pantalla completa con https.
+
 ## ⚡ Clips más rápido
 
 - **📍 Marcar momento (tecla `M`)**: mientras ves el directo, aprieta `M` cuando pase algo. Queda
@@ -143,7 +162,7 @@ La app ya viene lista para servidor (`Dockerfile`). Necesita un servidor **encen
 2. En [railway.com](https://railway.com) → **New Project → Deploy from GitHub repo** → elige el repo.
 3. En **Variables** agrega: `APP_PASSWORD` = una contraseña fuerte.
 4. En **Settings → Volumes** crea un volumen montado en `/data`.
-5. En **Settings → Networking → Generate Domain**. Listo: entras con cualquier usuario + tu contraseña.
+5. En **Settings → Networking → Generate Domain**. Listo: entras con tu contraseña.
 
 ### Opción B — Render (~7–25 US$/mes)
 Sube el repo a GitHub → en [render.com](https://render.com) **New → Blueprint** → elige el repo

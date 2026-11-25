@@ -68,17 +68,122 @@ if os.environ.get("YT_COOKIES") and not COOKIES.exists():
     COOKIES.write_text(os.environ["YT_COOKIES"].replace("\\n", "\n"), encoding="utf-8")
 
 
+# ---- acceso con contraseña: pantalla de inicio de sesión + sesión recordada (ideal para iPhone)
+def _secret_key():
+    f = DATA / ".secret"
+    if not f.exists():
+        f.write_text(uuid.uuid4().hex + uuid.uuid4().hex)
+        try:
+            os.chmod(f, 0o600)
+        except OSError:
+            pass
+    return f.read_text().strip()
+
+
+app.secret_key = _secret_key()
+app.config.update(PERMANENT_SESSION_LIFETIME=180 * 86400, SESSION_COOKIE_SAMESITE="Lax",
+                  SESSION_COOKIE_HTTPONLY=True,
+                  SESSION_COOKIE_SECURE=os.environ.get("PUBLIC_URL", "").startswith("https"))
+PW_TAG = __import__("hashlib").sha256(("clipper:" + APP_PASSWORD).encode()).hexdigest()[:16]
+OPEN_PATHS = ("/healthz", "/login", "/manifest.webmanifest", "/sw.js", "/static/icons/")
+
+
 @app.before_request
 def require_password():
-    """Protección con usuario/contraseña (Basic Auth) cuando APP_PASSWORD está definida."""
-    if not APP_PASSWORD or request.path == "/healthz" or request.path.startswith("/pub/"):
+    """Si APP_PASSWORD está definida, pide iniciar sesión (o Basic Auth para scripts)."""
+    import hmac
+    from flask import session
+    if not APP_PASSWORD or request.path.startswith("/pub/") or request.path.startswith(OPEN_PATHS):
+        return None
+    if session.get("ok") == PW_TAG:
         return None
     auth = request.authorization
-    import hmac
     if auth and hmac.compare_digest(auth.password or "", APP_PASSWORD):
         return None
+    if request.path.startswith("/api/") or request.method != "GET":
+        return jsonify(error="Sesión vencida: vuelve a entrar", login=True), 401
+    return redirect("/login?next=" + request.full_path.rstrip("?"))
+
+
+LOGIN_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Clipper"><meta name="theme-color" content="#0d0d10">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png"><link rel="manifest" href="/manifest.webmanifest">
+<title>Clipper · Entrar</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d10;
+color:#f2f2f5;font:16px system-ui,-apple-system,sans-serif;padding:24px;box-sizing:border-box}
+form{width:100%;max-width:360px;text-align:center}img{width:96px;border-radius:22px;box-shadow:0 10px 40px #ff2e6355}
+h1{font-size:24px;margin:18px 0 4px}p{color:#9a9aa8;margin:0 0 22px}
+input{width:100%;box-sizing:border-box;font-size:17px;padding:14px;border-radius:12px;border:1px solid #2a2a33;background:#17171c;color:#fff}
+button{width:100%;margin-top:12px;font-size:17px;font-weight:700;padding:14px;border-radius:12px;border:0;background:#ff2e63;color:#fff}
+.e{color:#ff6b8a;margin-top:12px;min-height:20px}</style></head><body>
+<form method="post"><img src="/static/icons/icon-180.png" alt=""><h1>Clipper en Vivo</h1><p>Clips virales desde el directo</p>
+<input type="hidden" name="username" value="clipper" autocomplete="username">
+<input type="password" name="password" placeholder="Contraseña" autocomplete="current-password" autofocus required>
+<button>Entrar</button><div class="e">__ERR__</div></form></body></html>"""
+
+_login_fails = {}
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    import hmac
+    from flask import session
+    nxt = request.args.get("next", "/")
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        nxt = "/"
+    if not APP_PASSWORD:
+        return redirect("/")
+    err = ""
+    if request.method == "POST":
+        ip = request.remote_addr or "?"
+        if _login_fails.get(ip, 0) >= 5:
+            time.sleep(3)  # frena a quien intente adivinar la clave
+        if hmac.compare_digest(request.form.get("password", ""), APP_PASSWORD):
+            _login_fails.pop(ip, None)
+            session.permanent = True
+            session["ok"] = PW_TAG
+            return redirect(nxt)
+        _login_fails[ip] = _login_fails.get(ip, 0) + 1
+        time.sleep(1)
+        err = "Contraseña incorrecta"
+    return LOGIN_HTML.replace("__ERR__", err)
+
+
+@app.get("/logout")
+def logout():
+    from flask import session
+    session.clear()
+    return redirect("/login")
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    data = {
+        "name": "Clipper en Vivo", "short_name": "Clipper", "lang": "es",
+        "description": "Clips virales desde transmisiones en vivo",
+        "start_url": "/", "scope": "/", "display": "standalone", "orientation": "portrait",
+        "background_color": "#0d0d10", "theme_color": "#0d0d10",
+        "icons": [{"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                  {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                  {"src": "/static/icons/maskable-512.png", "sizes": "512x512", "type": "image/png",
+                   "purpose": "maskable"}],
+    }
     from flask import Response
-    return Response("Acceso restringido", 401, {"WWW-Authenticate": 'Basic realm="Clipper en Vivo"'})
+    return Response(json.dumps(data, ensure_ascii=False), mimetype="application/manifest+json")
+
+
+@app.get("/sw.js")
+def service_worker():
+    from flask import Response
+    js = """// Clipper: permite instalar la app; todo se pide siempre al servidor (sin caché vieja)
+self.addEventListener('install', e => self.skipWaiting());
+self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', () => {});
+"""
+    return Response(js, mimetype="application/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/healthz")

@@ -2,7 +2,15 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Clipper">
+<meta name="theme-color" content="#0d0d10">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<link rel="icon" href="/static/icons/favicon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>Clipper en Vivo</title>
 <style>
   :root{--bg:#0d0d10;--card:#17171c;--line:#2a2a33;--txt:#f2f2f5;--mut:#9a9aa8;--acc:#ff2e63;--ok:#22c55e;--yel:#ffd60a}
@@ -88,18 +96,53 @@
   .acc b{min-width:92px}
   .ok{color:var(--ok)}
   .final img{width:100%;display:block}
+  .tabbar,.fab,.install{display:none}
+  @media(max-width:980px){
+    body{padding-bottom:calc(74px + env(safe-area-inset-bottom))}
+    header{padding:calc(10px + env(safe-area-inset-top)) 14px 10px}
+    header .keys{display:none}
+    main{padding:10px 10px 0;gap:0}
+    .card{padding:14px;border-radius:16px;margin-bottom:12px}
+    body:not([data-tab=directo]) [data-tab=directo],body:not([data-tab=editor]) [data-tab=editor],
+    body:not([data-tab=clips]) [data-tab=clips],body:not([data-tab=cuentas]) [data-tab=cuentas]{display:none}
+    input[type=text],input[type=password],textarea,select{font-size:16px}  /* evita el zoom de iPhone */
+    button{min-height:44px}
+    .grid4 button.big{font-size:18px;padding:16px 4px}
+    .finals{grid-template-columns:repeat(2,1fr)}
+    .final .a>*{min-height:40px;font-size:15px}
+    #editor video{max-height:46vh}
+    .styles.tpl{grid-template-columns:repeat(3,1fr)}
+    .pv img{width:150px}
+    .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:15;background:#111116ee;
+      backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);
+      padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+    .tabbar button{flex:1;background:none;border:0;color:var(--mut);font-size:11px;font-weight:600;
+      display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0;position:relative}
+    .tabbar button span{font-size:22px;line-height:1}
+    .tabbar button.on{color:var(--txt)}
+    .tabbar i{position:absolute;top:0;right:calc(50% - 22px);background:var(--acc);color:#fff;font-style:normal;
+      font-size:10px;border-radius:9px;padding:1px 5px;display:none}
+    body[data-tab=directo] .fab.rec{display:flex}
+    .fab{position:fixed;right:16px;bottom:calc(86px + env(safe-area-inset-bottom));z-index:14;width:68px;height:68px;
+      border-radius:50%;border:0;background:var(--yel);color:#111;font-size:30px;align-items:center;justify-content:center;
+      box-shadow:0 8px 30px #0009}
+    .install.show{display:block;position:fixed;left:10px;right:10px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:16;
+      background:#1d1d24;border:1px solid var(--line);border-radius:14px;padding:12px 40px 12px 14px;font-size:14px;box-shadow:0 10px 40px #000a}
+    .install button{position:absolute;right:6px;top:6px;background:none;border:0;color:var(--mut);font-size:18px;min-height:0}
+  }
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
 <body>
 <header>
   <h1>✂️ Clipper en Vivo</h1><span class="tag">LA CASA DE ALOFOKE 3</span>
-  <span class="mut" style="margin-left:auto">Atajos: <kbd>M</kbd> marcar · <kbd>1</kbd>-<kbd>4</kbd> capturar · <kbd>I</kbd>/<kbd>O</kbd> entrada/salida</span>
+  <a href="/logout" class="mut" style="margin-left:auto;text-decoration:none" title="Cerrar sesión">⎋</a>
+  <span class="mut keys">Atajos: <kbd>M</kbd> marcar · <kbd>1</kbd>-<kbd>4</kbd> capturar · <kbd>I</kbd>/<kbd>O</kbd> entrada/salida</span>
 </header>
 
 <main>
 <section>
-  <div class="card">
+  <div data-tab="directo" class="card">
     <h2>1 · Directo</h2>
     <div class="row">
       <input id="url" type="text" placeholder="Link del directo de YouTube (ej. https://www.youtube.com/watch?v=… o https://www.youtube.com/@canal/live)">
@@ -119,7 +162,7 @@
     <div class="player" id="player" style="margin-top:12px">El directo aparecerá aquí</div>
   </div>
 
-  <div class="card">
+  <div data-tab="directo" class="card">
     <h2>2 · Capturar lo que acaba de pasar</h2>
     <div class="grid4">
       <button class="big pri" data-cap="30">30 s</button>
@@ -158,14 +201,14 @@
     </details>
   </div>
 
-  <div class="card">
+  <div data-tab="directo" class="card">
     <h2>Capturas</h2>
     <div class="list" id="caps"><p class="mut">Todavía no hay capturas.</p></div>
   </div>
 </section>
 
 <section>
-  <div class="card" id="editor">
+  <div data-tab="editor" class="card" id="editor">
     <h2>3 · Editor</h2>
     <div id="edEmpty" class="mut">Elige una captura para editarla.</div>
     <div id="edBody" class="hidden">
@@ -288,12 +331,12 @@
     </div>
   </div>
 
-  <div class="card">
+  <div data-tab="clips" class="card">
     <h2>Trabajos</h2>
     <div id="jobs" class="mut">Nada en proceso.</div>
   </div>
 
-  <div class="card">
+  <div data-tab="cuentas" class="card">
     <h2>🚀 Cuentas para publicar</h2>
     <div id="accounts" class="mut">Cargando…</div>
     <details style="margin-top:8px">
@@ -307,7 +350,7 @@
     </details>
   </div>
 
-  <div class="card">
+  <div data-tab="clips" class="card">
     <h2>4 · Clips listos para subir</h2>
     <div class="finals" id="finals"><p class="mut">Aquí salen tus clips renderizados.</p></div>
     <div class="copy">
@@ -317,6 +360,17 @@
   </div>
 </section>
 </main>
+
+<nav class="tabbar">
+  <button data-go="directo" class="on"><span>🔴</span>Directo</button>
+  <button data-go="editor"><span>✂️</span>Editor</button>
+  <button data-go="clips"><span>🎬</span>Clips<i id="clipsBadge"></i></button>
+  <button data-go="cuentas"><span>🚀</span>Cuentas</button>
+</nav>
+<button class="fab" id="fabMark" title="Marcar momento">📍</button>
+<div class="install" id="installTip"><button id="installX">✕</button>
+  📲 <b>Instálala en tu iPhone:</b> toca <b>Compartir</b> <span style="font-size:17px">⎙</span> abajo en Safari y luego
+  <b>“Agregar a pantalla de inicio”</b>. Se abrirá como una app, a pantalla completa.</div>
 
 <div class="modal hidden" id="pubModal"><div>
   <h2 style="margin:0 0 10px;font-size:18px">🚀 Publicar clip</h2>
@@ -340,6 +394,7 @@ const api = async (path, body, method) => {
   const r = await fetch(path, {method: method || (body ? 'POST' : 'GET'),
     headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && j.login) { location.href = '/login?next=/'; throw new Error('login'); }
   if (!r.ok) { alert(j.error || 'Error'); throw new Error(j.error); }
   return j;
 };
@@ -464,6 +519,7 @@ $('#btnVod').onclick = async () => {
 const vid = $('#edVideo');
 function openClip(c) {
   current = c;
+  if (mobile()) goTab('editor');
   $('#edEmpty').classList.add('hidden'); $('#edBody').classList.remove('hidden');
   vid.src = '/clips/' + c.file + '?t=' + c.created;
   inT = 0; outT = c.duration || 0; showMarks();
@@ -526,6 +582,7 @@ $('#btnRender').onclick = async () => {
   saveSettings();
   await api('/api/render', {clip_id: current.id, in: inT, out: outT, ...getSettings(),
     cover_t: coverT === null ? null : coverT});
+  if (mobile()) goTab('clips');
   refresh();
 };
 
@@ -593,7 +650,7 @@ $('#momBatch').onclick = async () => {
   if (!items.length) return alert('Marca con ✔ los momentos que quieres convertir en clips');
   saveSettings();
   await api('/api/batch', {items, settings: getSettings()});
-  selected.clear(); renderMoments(true); refresh();
+  selected.clear(); renderMoments(true); if (mobile()) goTab('clips'); refresh();
 };
 const markNow = async () => { try { const m = await api('/api/marker', {}); flash('#btnMark', '📍 ¡Marcado!'); refresh(); } catch (e) {} };
 function flash(sel, txt) { const b = $(sel), o = b.innerHTML; b.innerHTML = txt; setTimeout(() => b.innerHTML = o, 900); }
@@ -619,15 +676,28 @@ $('#btnFind').onclick = () => findMoments({minutes: +$('#findMin').value});
 $('#btnFindCap').onclick = () => current && findMoments({clip_id: current.id});
 
 // ---- compartir / publicar
-async function shareClip(c) {
+const shareCache = new Map();
+async function shareClip(c, btn) {
+  navigator.clipboard && navigator.clipboard.writeText(CAPTION).catch(() => {});  // copy listo para pegar
   try {
-    const blob = await (await fetch('/clips/' + c.file)).blob();
-    const file = new File([blob], c.file, {type: 'video/mp4'});
-    if (navigator.canShare && navigator.canShare({files: [file]})) {
-      await navigator.clipboard.writeText(CAPTION).catch(() => {});
-      await navigator.share({files: [file], text: CAPTION});
-    } else { location.href = '/clips/' + c.file + '?dl=1'; alert('Tu navegador no permite compartir archivos: se descargó el video.'); }
-  } catch (e) { if (e.name !== 'AbortError') alert('No se pudo compartir: ' + e.message); }
+    let file = shareCache.get(c.id);
+    if (!file) {
+      if (btn) btn.textContent = '⏳';
+      const blob = await (await fetch('/clips/' + c.file)).blob();
+      file = new File([blob], c.file, {type: 'video/mp4'});
+      shareCache.set(c.id, file);
+    }
+    if (!(navigator.canShare && navigator.canShare({files: [file]}))) {
+      location.href = '/clips/' + c.file + '?dl=1';
+      return alert('Tu navegador no permite compartir archivos: se descargó el video.');
+    }
+    await navigator.share({files: [file], text: CAPTION});
+    if (btn) btn.textContent = '📲';
+  } catch (e) {
+    if (e.name === 'NotAllowedError' && btn) { btn.textContent = '📲 Toca otra vez'; return; }  // iPhone: el permiso venció mientras se descargaba
+    if (btn) btn.textContent = '📲';
+    if (e.name !== 'AbortError') alert('No se pudo compartir: ' + e.message);
+  }
 }
 let pubClip = null;
 function openPublish(c) {
@@ -681,6 +751,25 @@ document.addEventListener('keydown', e => {
   if (e.key === 'm' || e.key === 'M') markNow();
 });
 
+// ---- modo celular: pestañas, botón flotante y aviso para instalar en iPhone
+const mobile = () => matchMedia('(max-width: 980px)').matches;
+function goTab(t) {
+  document.body.dataset.tab = t;
+  document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.go === t));
+  if (t === 'clips') { newClips = 0; $('#clipsBadge').style.display = 'none'; }
+  try { localStorage.setItem('tab', t); } catch (e) {}
+  if (mobile()) window.scrollTo({top: 0});
+}
+let newClips = 0;
+document.querySelectorAll('.tabbar button').forEach(b => b.onclick = () => goTab(b.dataset.go));
+try { goTab(localStorage.getItem('tab') || 'directo'); } catch (e) { goTab('directo'); }
+$('#fabMark').onclick = () => { if (navigator.vibrate) navigator.vibrate(30); markNow(); flash('#fabMark', '✅'); };
+const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+try { if (isIOS && !standalone && !localStorage.getItem('installTipOff')) $('#installTip').classList.add('show'); } catch (e) {}
+$('#installX').onclick = () => { $('#installTip').classList.remove('show'); try { localStorage.setItem('installTipOff', '1'); } catch (e) {} };
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
 // ---- estado
 let lastSig = '';
 function renderLists() {
@@ -706,7 +795,7 @@ function renderLists() {
       <video src="/clips/${c.file}" controls preload="metadata" playsinline ${c.cover ? `poster="/clips/${c.cover}"` : ''}></video>
       <div class="mut" style="padding:4px 6px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.label)}</div>
       <div class="a"><a class="btn" href="/clips/${c.file}?dl=1" title="Descargar">⬇</a>
-        <button data-share="${c.id}" title="Compartir a TikTok, Instagram, Facebook… (celular)">📲</button>
+        <button data-share="${c.id}" title="Compartir o Guardar en Fotos (TikTok, Instagram, Facebook…)">📲</button>
         <button data-pub="${c.id}" title="Publicar en tus cuentas">🚀</button>
         <button data-del="${c.id}" title="Borrar">🗑</button></div>
       ${c.cover ? `<div class="a" style="padding-top:0"><a class="btn" href="/clips/${c.cover}?dl=1">⬇ Portada</a></div>` : ''}
@@ -714,7 +803,7 @@ function renderLists() {
 }
 document.body.addEventListener('click', async e => {
   const o = e.target.dataset.open, d = e.target.dataset.del, sh = e.target.dataset.share, pb = e.target.dataset.pub;
-  if (sh) shareClip(state.clips.find(c => c.id === sh));
+  if (sh) shareClip(state.clips.find(c => c.id === sh), e.target);
   if (pb) openPublish(state.clips.find(c => c.id === pb));
   if (o) openClip(state.clips.find(c => c.id === o));
   if (d && confirm('¿Borrar?')) { await api('/api/clip/' + d, null, 'DELETE'); if (current && current.id === d) current = null; refresh(); }
@@ -739,6 +828,11 @@ async function refresh() {
   if (state.logo && !$('#logoPv').src) $('#logoPv').src = '/api/logo.png?t=' + Date.now();
   if (!state.logo) $('#logoPv').removeAttribute('src');
   ['#btnMark', '#btnFind'].forEach(b => $(b).disabled = !r.buffer);
+  $('#fabMark').classList.toggle('rec', !!r.running);
+  const finIds = state.clips.filter(c => c.type === 'final').map(c => c.id);
+  if (!firstLoad) finIds.forEach(id => { if (!seenFinals.has(id) && document.body.dataset.tab !== 'clips') newClips++; });
+  finIds.forEach(id => seenFinals.add(id));
+  $('#clipsBadge').textContent = newClips; $('#clipsBadge').style.display = newClips ? 'block' : 'none';
   renderAccounts(); renderMoments(false);
   $('#subsNote').textContent = state.subs_available ? '' : '(no instalado en este equipo: ver README)';
   $('#subs').disabled = !state.subs_available;
