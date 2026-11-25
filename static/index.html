@@ -20,7 +20,8 @@
   header h1{font-size:18px;margin:0}
   header .tag{background:var(--acc);color:#fff;font-weight:700;font-size:12px;padding:3px 8px;border-radius:6px}
   main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;padding:16px 20px;max-width:1500px;margin:auto}
-  @media(max-width:980px){main{grid-template-columns:1fr}}
+  @media(max-width:980px){main{grid-template-columns:minmax(0,1fr)}}
+  main>section,.card,#edBody,.esec{min-width:0}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
   .card h2{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 12px}
   input[type=text],textarea,select{width:100%;background:#0f0f13;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 12px;font:inherit}
@@ -54,7 +55,7 @@
   .final .a{display:flex;gap:4px;padding:6px}
   .final .a>*{flex:1;padding:6px;font-size:12px;text-align:center;text-decoration:none}
   a.btn{background:#26262e;border:1px solid var(--line);color:var(--txt);border-radius:8px;font-weight:600}
-  #editor video{width:100%;max-height:360px;background:#000;border-radius:10px}
+  #editor video{width:100%;max-height:360px;background:#000;border-radius:10px;display:block}
   .marks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
   .mk{background:#0f0f13;border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}
   .mk b{font-size:20px;font-variant-numeric:tabular-nums}
@@ -110,7 +111,6 @@
     .grid4 button.big{font-size:18px;padding:16px 4px}
     .finals{grid-template-columns:repeat(2,1fr)}
     .final .a>*{min-height:40px;font-size:15px}
-    #editor video{max-height:46vh}
     .styles.tpl{grid-template-columns:repeat(3,1fr)}
     .pv img{width:150px}
     .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:15;background:#111116ee;
@@ -148,6 +148,52 @@
   .ckhelp ol{margin:6px 0 0;padding-left:20px}
   .ckhelp li{margin:3px 0}
   .ckhelp b{color:var(--txt)}
+  /* ---- editor */
+  .tl{position:relative;height:40px;margin:10px 4px 4px;background:#26262e;border-radius:8px;touch-action:none;cursor:pointer}
+  .tl-sel{position:absolute;top:0;bottom:0;background:#ffd60a33;border-top:3px solid var(--yel);border-bottom:3px solid var(--yel)}
+  .tl-play{position:absolute;top:-4px;bottom:-4px;width:2px;background:#fff;pointer-events:none}
+  .tl-h{position:absolute;top:-6px;bottom:-6px;width:26px;margin-left:-13px;background:var(--yel);border-radius:6px;
+    display:flex;align-items:center;justify-content:center;color:#111;font-size:11px;touch-action:none;cursor:ew-resize}
+  .trim{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .tbox{background:#0f0f13;border:1px solid var(--line);border-radius:12px;padding:8px;text-align:center}
+  .tbox b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+  .nud{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:6px}
+  .nud button{padding:8px 2px;font-size:13px;min-width:0}
+  .nud #btnIn,.nud #btnOut{grid-column:1/-1;order:-1;background:#3a3320;border-color:#6b5a1e}
+  .trimrow{margin-top:8px}
+  .trimrow button{flex:0 0 auto}
+  button.ghost{background:none;border-style:dashed;width:100%;margin-top:8px;font-size:13px}
+  .esec{border-top:1px solid var(--line);margin-top:12px;padding-top:4px}
+  .esec>summary{list-style:none;cursor:pointer;font-weight:700;font-size:15px;padding:8px 0;display:flex;align-items:center;gap:6px}
+  .esec>summary::-webkit-details-marker{display:none}
+  .esec>summary::after{content:"›";margin-left:auto;font-size:22px;color:var(--mut);transition:transform .2s}
+  .esec[open]>summary::after{transform:rotate(90deg)}
+  .esec .sum{font-weight:500;font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
+  .ideas{margin-top:6px;flex-wrap:wrap}
+  .logorow{align-items:center}
+  .logorow>*{flex:0 0 auto}
+  #logoPv{height:40px;border-radius:6px;background:#333}
+  .btnfile{position:relative;overflow:hidden;background:#26262e;border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-weight:600;font-size:14px;cursor:pointer}
+  .btnfile input{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .renderbar{margin-top:14px}
+  .renderbar button{width:100%}
+  @media(max-width:980px){
+    .vwrap{position:sticky;top:calc(52px + env(safe-area-inset-top));z-index:6;background:var(--card);margin:-14px -14px 0;padding:10px 14px 4px;border-radius:16px 16px 0 0;box-shadow:0 8px 16px -8px #000}
+    #editor video{max-height:27vh;border-radius:10px}
+    #editor h2{display:none}
+    kbd{display:none}
+    .styles,.styles.tpl{display:flex;overflow-x:auto;gap:8px;scroll-snap-type:x mandatory;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+    .styles button{flex:0 0 44%;scroll-snap-align:start}
+    .styles.tpl button{flex:0 0 30%}
+    .seg label{padding:10px 4px;font-size:13px}
+    .pv{align-items:center}
+    .pv img{width:44%}
+    .tplbox .row>*{flex:1 1 100%}
+    body[data-tab=editor]{padding-bottom:calc(140px + env(safe-area-inset-bottom))}
+    body[data-tab=editor] #edBody:not(.hidden) .renderbar{position:fixed;left:0;right:0;z-index:14;margin:0;
+      bottom:calc(62px + env(safe-area-inset-bottom));padding:8px 12px;background:#0d0d10e6;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+    body[data-tab=editor] .renderbar button{font-size:17px;padding:14px}
+  }
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
@@ -259,26 +305,38 @@
     <h2>3 · Editor</h2>
     <div id="edEmpty" class="mut">Elige una captura para editarla.</div>
     <div id="edBody" class="hidden">
-      <video id="edVideo" controls playsinline></video>
-      <div class="marks">
-        <div class="mk"><div class="mut">Entrada</div><b id="inT">0:00.0</b><div class="row" style="margin-top:6px"><button id="btnIn">Marcar <kbd>I</kbd></button><button id="goIn">Ir</button></div></div>
-        <div class="mk"><div class="mut">Salida</div><b id="outT">0:00.0</b><div class="row" style="margin-top:6px"><button id="btnOut">Marcar <kbd>O</kbd></button><button id="goOut">Ir</button></div></div>
+      <div class="vwrap">
+        <video id="edVideo" controls playsinline></video>
+        <div class="tl" id="tl" title="Arrastra los bordes para recortar">
+          <div class="tl-sel" id="tlSel"></div><div class="tl-play" id="tlPlay"></div>
+          <div class="tl-h" id="hIn"><span>◀</span></div><div class="tl-h" id="hOut"><span>▶</span></div>
+        </div>
       </div>
-      <p class="mut" id="durInfo" style="margin:0">Duración: —</p>
-      <button id="btnFindCap" style="margin-top:6px;font-size:13px">🔎 Buscar tomas importantes en esta captura</button>
-
-      <label class="f">Hook (texto arriba del video)</label>
-      <textarea id="hook" placeholder="Ej: SE ARMÓ EL *LÍO* EN LA CASA 😱"></textarea>
-      <p class="mut" style="margin:4px 0">Pon *entre asteriscos* las palabras que quieres resaltar en color. Los emojis salen a color.</p>
-      <div class="hookcats" id="hookCats"></div>
-      <div class="row" style="margin-top:6px;flex-wrap:wrap" id="hookIdeas"></div>
-
-      <label class="f">Estilo del hook</label>
-      <div class="seg" style="margin-bottom:8px">
-        <label><input type="radio" name="sgroup" value="templates" checked><span>⭐ Plantillas PRO (15)</span></label>
-        <label><input type="radio" name="sgroup" value="simple"><span>Estilos simples (10)</span></label>
+      <div class="trim">
+        <div class="tbox"><span class="mut">Inicio</span><b id="inT">0:00.0</b>
+          <div class="nud"><button data-nudge="in:-0.5">−½s</button><button id="btnIn" title="Inicio aquí (tecla I)">📍 Aquí</button><button data-nudge="in:0.5">+½s</button></div></div>
+        <div class="tbox"><span class="mut">Final</span><b id="outT">0:00.0</b>
+          <div class="nud"><button data-nudge="out:-0.5">−½s</button><button id="btnOut" title="Final aquí (tecla O)">📍 Aquí</button><button data-nudge="out:0.5">+½s</button></div></div>
       </div>
-      <div class="styles" id="styles"></div>
+      <div class="row trimrow">
+        <button id="goIn">▶ Ver recorte</button><button id="goOut">⏭ Ver final</button>
+        <span class="mut" id="durInfo">Duración: —</span>
+      </div>
+      <button id="btnFindCap" class="ghost">🔎 Buscar tomas importantes en esta captura</button>
+
+      <details class="esec" open data-sec="hook"><summary>✍️ Hook <span class="sum" id="sumHook"></span></summary>
+        <textarea id="hook" placeholder="Ej: SE ARMÓ EL *LÍO* EN LA CASA 😱"></textarea>
+        <p class="mut" style="margin:4px 0">*Entre asteriscos* = palabra resaltada en color. Los emojis salen a color.</p>
+        <div class="hookcats" id="hookCats"></div>
+        <div class="row ideas" id="hookIdeas"></div>
+      </details>
+
+      <details class="esec" open data-sec="estilo"><summary>🎨 Estilo del hook <span class="sum" id="sumStyle"></span></summary>
+        <div class="seg" style="margin-bottom:8px">
+          <label><input type="radio" name="sgroup" value="templates" checked><span>⭐ PRO (15)</span></label>
+          <label><input type="radio" name="sgroup" value="simple"><span>Simples (10)</span></label>
+        </div>
+        <div class="styles" id="styles"></div>
       <div id="tplOpts" class="tplbox hidden">
         <div class="row">
           <div><label class="f">Encabezado</label><input type="text" id="tplBadge" placeholder=""></div>
@@ -293,62 +351,61 @@
         </div>
         <button type="button" id="tplSample" style="margin-top:8px;font-size:13px">Usar texto de ejemplo de esta plantilla</button>
       </div>
-      <div class="row" style="margin-top:8px">
+        <label class="f">Posición</label>
         <div class="seg">
           <label><input type="radio" name="hpos" value="arriba" checked><span>Arriba</span></label>
           <label><input type="radio" name="hpos" value="centro"><span>Centro</span></label>
           <label><input type="radio" name="hpos" value="abajo"><span>Abajo</span></label>
         </div>
-      </div>
-      <label class="f">Tamaño del hook: <span id="hsizeV">100%</span></label>
-      <input type="range" id="hsize" min="60" max="140" value="100">
-      <div class="pv"><img id="hookPv" alt="Vista previa"><span class="mut">Vista previa con el fotograma actual</span></div>
+        <label class="f">Tamaño: <span id="hsizeV">100%</span></label>
+        <input type="range" id="hsize" min="60" max="140" value="100">
+        <div class="pv"><img id="hookPv" alt="Vista previa"><span class="mut">Vista previa con el fotograma actual del video</span></div>
+      </details>
 
-      <label class="f">Formato</label>
-      <div class="seg">
-        <label><input type="radio" name="fmt" value="vertical" checked><span>9:16 Vertical</span></label>
-        <label><input type="radio" name="fmt" value="cuadrado"><span>1:1 Cuadrado</span></label>
-        <label><input type="radio" name="fmt" value="horizontal"><span>16:9</span></label>
-      </div>
-
-      <div id="vertOpts">
-        <label class="f">Estilo vertical</label>
+      <details class="esec" data-sec="formato"><summary>📐 Formato <span class="sum" id="sumFmt"></span></summary>
         <div class="seg">
-          <label><input type="radio" name="mode" value="blur" checked><span>Fondo desenfocado</span></label>
-          <label><input type="radio" name="mode" value="fill"><span>Pantalla completa (recorte)</span></label>
+          <label><input type="radio" name="fmt" value="vertical" checked><span>9:16</span></label>
+          <label><input type="radio" name="fmt" value="cuadrado"><span>1:1</span></label>
+          <label><input type="radio" name="fmt" value="horizontal"><span>16:9</span></label>
         </div>
-        <label class="f">Posición horizontal del recorte: <span id="posV">centro</span></label>
-        <input type="range" id="pos" min="0" max="100" value="50">
-        <label class="f">Zoom: <span id="zoomV">100%</span></label>
-        <input type="range" id="zoom" min="100" max="200" value="100">
-      </div>
+        <div id="vertOpts">
+          <div class="seg" style="margin-top:8px">
+            <label><input type="radio" name="mode" value="blur" checked><span>Fondo borroso</span></label>
+            <label><input type="radio" name="mode" value="fill"><span>Pantalla completa</span></label>
+          </div>
+          <label class="f">Mover el encuadre: <span id="posV">centro</span></label>
+          <input type="range" id="pos" min="0" max="100" value="50">
+          <label class="f">Zoom: <span id="zoomV">100%</span></label>
+          <input type="range" id="zoom" min="100" max="200" value="100">
+        </div>
+      </details>
 
-      <div class="sect"><h3>💧 Marca de agua</h3>
-        <div class="row">
-          <input type="text" id="wm" placeholder="@tucuenta (texto)">
-          <select id="wmPos" style="flex:0 0 150px"><option value="abajo">Abajo centro</option><option value="inf_der">Abajo derecha</option><option value="inf_izq">Abajo izquierda</option><option value="sup_der">Arriba derecha</option><option value="sup_izq">Arriba izquierda</option></select>
+      <details class="esec" data-sec="marca"><summary>💧 Marca de agua <span class="sum" id="sumWm"></span></summary>
+        <label class="f">Tu @usuario</label>
+        <input type="text" id="wm" placeholder="@tucuenta">
+        <div class="row" style="margin-top:6px">
+          <select id="wmPos"><option value="abajo">Abajo centro</option><option value="inf_der">Abajo derecha</option><option value="inf_izq">Abajo izquierda</option><option value="sup_der">Arriba derecha</option><option value="sup_izq">Arriba izquierda</option></select>
         </div>
-        <label class="f">Transparencia del texto: <span id="wmOpV">85%</span></label>
+        <label class="f">Transparencia: <span id="wmOpV">85%</span></label>
         <input type="range" id="wmOp" min="20" max="100" value="85">
-        <div class="row" style="margin-top:8px">
-          <label class="chk" style="flex:0 0 auto"><input type="checkbox" id="logoOn"> Usar logo</label>
-          <img id="logoPv" class="hidden" style="height:40px;flex:0 0 auto;background:#333;border-radius:6px">
-          <input type="file" id="logoFile" accept="image/*" style="flex:1">
-          <button id="logoDel" style="flex:0 0 auto" title="Quitar logo">🗑</button>
+        <label class="f">Logo</label>
+        <div class="row logorow">
+          <label class="chk"><input type="checkbox" id="logoOn"> Usar logo</label>
+          <img id="logoPv" class="hidden">
+          <label class="btnfile">📷 Elegir imagen<input type="file" id="logoFile" accept="image/*"></label>
+          <button id="logoDel" title="Quitar logo">🗑</button>
         </div>
-        <div class="row">
-          <select id="logoPos"><option value="sup_der">Arriba derecha</option><option value="sup_izq">Arriba izquierda</option><option value="inf_der">Abajo derecha</option><option value="inf_izq">Abajo izquierda</option><option value="abajo">Abajo centro</option></select>
-          <label class="mut">Tamaño <input type="range" id="logoSize" min="6" max="35" value="14"></label>
-          <label class="mut">Opacidad <input type="range" id="logoOp" min="20" max="100" value="90"></label>
-        </div>
-      </div>
+        <select id="logoPos" style="margin-top:6px"><option value="sup_der">Arriba derecha</option><option value="sup_izq">Arriba izquierda</option><option value="inf_der">Abajo derecha</option><option value="inf_izq">Abajo izquierda</option><option value="abajo">Abajo centro</option></select>
+        <label class="f">Tamaño del logo</label><input type="range" id="logoSize" min="6" max="35" value="14">
+        <label class="f">Opacidad del logo</label><input type="range" id="logoOp" min="20" max="100" value="90">
+      </details>
 
-      <div class="sect"><h3>💬 Subtítulos automáticos</h3>
+      <details class="esec" data-sec="subs"><summary>💬 Subtítulos <span class="sum" id="sumSubs"></span></summary>
         <label class="chk"><input type="checkbox" id="subs"> Activar subtítulos palabra por palabra <span class="mut" id="subsNote"></span></label>
         <div class="seg">
           <label><input type="radio" name="substyle" value="amarillo" checked><span>Amarillo</span></label>
           <label><input type="radio" name="substyle" value="verde"><span>Verde</span></label>
-          <label><input type="radio" name="substyle" value="caja"><span>Caja negra</span></label>
+          <label><input type="radio" name="substyle" value="caja"><span>Caja</span></label>
           <label><input type="radio" name="substyle" value="blanco"><span>Blanco</span></label>
         </div>
         <div class="seg" style="margin-top:6px">
@@ -356,26 +413,26 @@
           <label><input type="radio" name="subpos" value="centro"><span>Centro</span></label>
           <label><input type="radio" name="subpos" value="arriba"><span>Arriba</span></label>
         </div>
-      </div>
+      </details>
 
-      <div class="sect"><h3>🖼 Portada</h3>
-        <label class="chk"><input type="checkbox" id="coverOn"> Poner la portada al inicio del video (TikTok la usa como portada)</label>
-        <input type="text" id="coverText" placeholder="Texto de la portada (vacío = el mismo hook)">
-        <div class="row" style="margin-top:6px">
-          <span class="mut">Fotograma de portada: <b id="coverT">entrada</b></span>
-          <button id="coverSetT" style="flex:0 0 auto;font-size:13px">Usar fotograma actual</button>
-          <button id="coverMake" style="flex:0 0 auto;font-size:13px">🖼 Crear portada (JPG)</button>
+      <details class="esec" data-sec="portada"><summary>🖼 Portada <span class="sum" id="sumCover"></span></summary>
+        <label class="chk"><input type="checkbox" id="coverOn"> Poner portada al inicio (TikTok la usa de portada)</label>
+        <input type="text" id="coverText" placeholder="Texto de la portada (vacío = el hook)">
+        <p class="mut" style="margin:8px 0 4px">Fotograma: <b id="coverT">inicio del recorte</b></p>
+        <div class="row">
+          <button id="coverSetT">📍 Usar fotograma actual</button>
+          <button id="coverMake">🖼 Crear JPG</button>
         </div>
-      </div>
+      </details>
 
-      <div class="sect"><h3>⚡ Velocidad</h3>
+      <details class="esec" data-sec="velocidad"><summary>⚡ Velocidad <span class="sum" id="sumSpeed"></span></summary>
         <div class="seg">
-          <label><input type="radio" name="speed" value="rapido" checked><span>Rápido (recomendado)</span></label>
+          <label><input type="radio" name="speed" value="rapido" checked><span>Rápido</span></label>
           <label><input type="radio" name="speed" value="calidad"><span>Máxima calidad</span></label>
         </div>
-      </div>
+      </details>
 
-      <button class="pri big" id="btnRender" style="width:100%;margin-top:12px">🎬 Renderizar clip</button>
+      <div class="renderbar"><button class="pri big" id="btnRender">🎬 Renderizar clip</button></div>
     </div>
   </div>
 
@@ -645,20 +702,87 @@ function openClip(c) {
   $('#edEmpty').classList.add('hidden'); $('#edBody').classList.remove('hidden');
   vid.src = '/clips/' + c.file + '?t=' + c.created;
   inT = 0; outT = c.duration || 0; showMarks();
+  coverT = null; $('#coverT').textContent = 'inicio del recorte'; setTimeout(updSummaries, 0);
   vid.onloadedmetadata = () => { if (!outT || outT > vid.duration) outT = vid.duration; showMarks(); updPreview(false); };
   vid.onseeked = vid.onpause = () => updPreview(false);
   renderLists();
 }
 function showMarks() {
   $('#inT').textContent = fmt(inT); $('#outT').textContent = fmt(outT);
+  updTimeline();
   const d = outT - inT;
   $('#durInfo').textContent = 'Duración: ' + (d > 0 ? d.toFixed(1) + ' s' : '⚠ la salida debe ir después de la entrada') +
     (d > 180 ? ' (TikTok/Reels funcionan mejor < 90 s)' : '');
 }
 $('#btnIn').onclick = () => { inT = vid.currentTime; if (outT <= inT) outT = vid.duration; showMarks(); };
 $('#btnOut').onclick = () => { outT = vid.currentTime; showMarks(); };
-$('#goIn').onclick = () => { vid.currentTime = inT; vid.play(); };
-$('#goOut').onclick = () => { vid.currentTime = Math.max(0, outT - 3); vid.play(); };
+// ---- recorte táctil: barra con bordes que se arrastran, ±½ s y vista del recorte
+let stopAt = null;
+const vdur = () => (isFinite(vid.duration) && vid.duration) || (current && current.duration) || 0;
+function updTimeline() {
+  const D = vdur(); if (!D) return;
+  const a = inT / D * 100, b = outT / D * 100;
+  $('#tlSel').style.left = a + '%'; $('#tlSel').style.width = Math.max(0, b - a) + '%';
+  $('#hIn').style.left = a + '%'; $('#hOut').style.left = b + '%';
+  $('#tlPlay').style.left = (vid.currentTime / D * 100) + '%';
+}
+function setIn(t) { inT = Math.max(0, Math.min(t, outT - 0.5)); showMarks(); }
+function setOut(t) { outT = Math.min(vdur(), Math.max(t, inT + 0.5)); showMarks(); }
+function tlTime(e) { const r = $('#tl').getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * vdur(); }
+let dragging = null;
+['hIn', 'hOut'].forEach(id => {
+  const h = $('#' + id);
+  h.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); dragging = id; h.setPointerCapture(e.pointerId); vid.pause(); });
+  h.addEventListener('pointermove', e => {
+    if (dragging !== id) return;
+    const t = tlTime(e);
+    if (id === 'hIn') setIn(t); else setOut(t);
+    vid.currentTime = id === 'hIn' ? inT : outT;  // muestra el cuadro donde vas a cortar
+  });
+  h.addEventListener('pointerup', () => { dragging = null; updPreview(false); });
+  h.addEventListener('pointercancel', () => { dragging = null; });
+});
+$('#tl').addEventListener('pointerdown', e => { if (e.target.closest('.tl-h')) return; vid.currentTime = tlTime(e); updTimeline(); });
+vid.addEventListener('timeupdate', () => {
+  updTimeline();
+  if (stopAt !== null && vid.currentTime >= stopAt) { vid.pause(); stopAt = null; }
+});
+vid.addEventListener('loadedmetadata', updTimeline);
+document.querySelectorAll('[data-nudge]').forEach(b => b.onclick = () => {
+  const [which, d] = b.dataset.nudge.split(':');
+  if (which === 'in') { setIn(inT + +d); vid.currentTime = inT; } else { setOut(outT + +d); vid.currentTime = outT; }
+});
+$('#goIn').onclick = () => { vid.currentTime = inT; stopAt = outT; vid.play(); };
+$('#goOut').onclick = () => { vid.currentTime = Math.max(inT, outT - 3); stopAt = outT; vid.play(); };
+
+// ---- secciones del editor: en celular se abren de a una; resumen de cada una
+const isMobileNow = () => matchMedia('(max-width: 980px)').matches;
+document.querySelectorAll('.esec').forEach(d => {
+  if (isMobileNow()) d.open = d.dataset.sec === 'hook';
+  else d.open = true;
+  d.addEventListener('toggle', () => {
+    if (isMobileNow() && d.open) {
+      document.querySelectorAll('.esec').forEach(o => { if (o !== d) o.open = false; });
+      setTimeout(() => d.scrollIntoView({behavior: 'smooth', block: 'start'}), 60);
+      if (d.dataset.sec === 'estilo') updPreview(false);
+    }
+  });
+});
+function updSummaries() {
+  const h = $('#hook').value.replace(/\*/g, '').trim();
+  $('#sumHook').textContent = h ? '· ' + h : '· sin texto';
+  const all = [...(styleData.templates || []), ...(styleData.simple || [])];
+  const st = all.find(x => x.id === hookStyle);
+  $('#sumStyle').textContent = st ? '· ' + st.name : '';
+  $('#sumFmt').textContent = '· ' + ({vertical: '9:16', cuadrado: '1:1', horizontal: '16:9'}[radio('fmt')]) + (radio('fmt') !== 'horizontal' ? (radio('mode') === 'fill' ? ' completa' : ' borroso') : '');
+  $('#sumWm').textContent = '· ' + ([$('#wm').value.trim(), $('#logoOn').checked ? 'logo' : ''].filter(Boolean).join(' + ') || 'ninguna');
+  $('#sumSubs').textContent = $('#subs').checked ? '· ' + radio('substyle') : '· apagados';
+  $('#sumCover').textContent = $('#coverOn').checked ? '· al inicio' : '· no';
+  $('#sumSpeed').textContent = '· ' + (radio('speed') === 'rapido' ? 'rápido' : 'calidad');
+}
+document.querySelector('#edBody').addEventListener('input', () => setTimeout(updSummaries, 0));
+document.querySelector('#edBody').addEventListener('change', () => setTimeout(updSummaries, 0));
+document.querySelector('#edBody').addEventListener('click', () => setTimeout(updSummaries, 50));
 
 const updOpts = () => {
   const f = document.querySelector('[name=fmt]:checked').value;
