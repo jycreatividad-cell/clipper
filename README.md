@@ -102,6 +102,20 @@ En el celular la app se organiza en pestañas abajo: **🔴 Directo · ✂️ Ed
   agua, portada). Se renderizan `RENDER_WORKERS` a la vez (2 por defecto) y el resto espera en cola.
 - **Velocidad "Rápido"** (por defecto) renderiza más ligero; "Máxima calidad" para clips especiales.
 
+## 🔊 Efectos de sonido
+
+En el editor → **🔊 Efectos de sonido**:
+- **Biblioteca de 14 efectos** creados desde cero (sin derechos de terceros): 💥 Boom, 💨 Whoosh,
+  🔔 Ding, 😱 Dun dun duuun, 🎺 Trompeta triste, 📣 Bocina, 🦗 Grillos, 😬 Suspenso, ❌ Error, 🫧 Pop,
+  🤪 Boing, 🥁 Redoble, 📸 Flash, 📺 Glitch. Se regeneran con `python generar_sonidos.py`.
+- Pausa el video donde quieres el efecto → toca el efecto → **➕ Agregar**. Puedes poner varios, con
+  volumen, y **🔍 Zoom de impacto** (la imagen se acerca al sonar, ideal con el Boom).
+- Los efectos se escuchan al reproducir el video en el editor y se marcan en la barra de recorte.
+- **Efecto al empezar cada clip**: se aplica también al crear varios clips a la vez.
+- **🎵 Subir mi sonido**: sube tus audios de memes (ej. el "faaah") y quedan en tu biblioteca
+  (máx. 15 s, volumen igualado). Mantén presionado uno tuyo para borrarlo. Ojo: los audios de memes
+  pueden tener derechos de autor; úsalos bajo tu responsabilidad.
+
 ## 🖼 Portada, 💬 subtítulos y 💧 marca de agua
 
 - **Portada**: elige un fotograma ("Usar fotograma actual") y escribe el texto. "Crear portada" saca un

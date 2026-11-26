@@ -54,7 +54,7 @@ QUALITY = os.environ.get("CALIDAD", "1080")  # altura máxima a grabar
 LIVE_FORMAT = (f"b[height<={QUALITY}]/bv*[height<={QUALITY}]+ba/b/bv*+ba/best")
 
 app = Flask(__name__, static_folder=str(BASE / "static"))
-app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # https detrás de Railway/Render
 social = Social(DATA)
 LOGO = DATA / "logo.png"
@@ -942,6 +942,40 @@ def video_lead(path):
     return 0.0
 
 
+SFX_DIR = BASE / "static" / "sfx"
+SOUNDS_DIR = DATA / "sounds"
+SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+BUILTIN_SFX = [  # (id, emoji, nombre) - creados con generar_sonidos.py, sin derechos de terceros
+    ("boom", "💥", "Boom"), ("whoosh", "💨", "Whoosh"), ("ding", "🔔", "Ding"),
+    ("dundun", "😱", "Dun dun duuun"), ("triste", "🎺", "Trompeta triste"), ("bocina", "📣", "Bocina"),
+    ("grillos", "🦗", "Grillos"), ("suspenso", "😬", "Suspenso"), ("error", "❌", "Error"),
+    ("pop", "🫧", "Pop"), ("boing", "🤪", "Boing"), ("redoble", "🥁", "Redoble"),
+    ("flash", "📸", "Flash"), ("glitch", "📺", "Glitch"),
+]
+
+
+def sound_list():
+    out = [{"id": i, "emoji": e, "name": n, "url": f"/static/sfx/{i}.mp3", "custom": False}
+           for i, e, n in BUILTIN_SFX if (SFX_DIR / f"{i}.mp3").exists()]
+    for m in sorted(SOUNDS_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime):
+        try:
+            d = json.loads(m.read_text(encoding="utf-8"))
+            if (SOUNDS_DIR / f"{d['id']}.mp3").exists():
+                out.append({**d, "url": f"/sounds/{d['id']}.mp3", "custom": True})
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+def sound_path(sid):
+    if not re.fullmatch(r"[A-Za-z0-9_]+", str(sid or "")):
+        return None
+    for p in (SFX_DIR / f"{sid}.mp3", SOUNDS_DIR / f"{sid}.mp3"):
+        if p.exists():
+            return p
+    return None
+
+
 def has_audio(path):
     out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
                           "stream=index", "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout
@@ -1051,6 +1085,24 @@ def job_render(jid, opts):
                       style=opts.get("subs_style", "amarillo"), pos=opts.get("subs_pos", "abajo"))
             add("subtitles=subs.ass:fontsdir=.")
 
+    # ---- efectos de sonido del clip (+ uno al empezar, útil en lotes)
+    sfx_items = []
+    for it in (opts.get("sfx") or []):
+        try:
+            ts = float(it.get("t", 0))
+        except (TypeError, ValueError):
+            continue
+        p = sound_path(it.get("id"))
+        if p and t_in - 0.05 <= ts < t_out:
+            sfx_items.append((p, max(0.0, ts - t_in), float(it.get("vol", 100)) / 100, bool(it.get("zoom"))))
+    intro = sound_path(opts.get("sfx_intro"))
+    if intro:
+        sfx_items.append((intro, 0.0, float(opts.get("sfx_intro_vol", 100)) / 100, False))
+    zooms = [t for _, t, _, z in sfx_items if z]
+    if zooms:  # zoom de impacto: acerca la imagen 0.35 s al sonar el efecto
+        expr = "+".join(f"between(t,{z:.2f},{z + 0.35:.2f})" for z in zooms)
+        add(f"scale=w='{W}*(1+0.18*min(1,{expr}))':h=-2:eval=frame,crop={W}:{H},setsar=1")
+
     # ---- hook (imagen PNG con el estilo elegido, ver hooks.py)
     hook = (opts.get("hook") or "").strip()
     if hook:
@@ -1082,9 +1134,28 @@ def job_render(jid, opts):
         add(f"drawtext={font_opt}textfile=wm.txt:fontsize={fs}:fontcolor=white@{op:.2f}:"
             f"borderw=3:bordercolor=black@{op * 0.7:.2f}:x={x}:y={y}")
 
+    # ---- mezcla: audio del clip + efectos en su segundo
+    audio_map = "0:a:0?"
+    audio_lbl = "0:a"
+    src_audio = has_audio(src)
+    if sfx_items:
+        if src_audio:
+            chain.append("[0:a]aformat=channel_layouts=stereo,aresample=48000[am0]")
+        else:
+            chain.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{dur:.3f}[am0]")
+        labels = ["[am0]"]
+        for i, (p, t, vol, _) in enumerate(sfx_items[:20]):
+            k = add_input(p)
+            ms = int(t * 1000)
+            chain.append(f"[{k}:a]aformat=channel_layouts=stereo,aresample=48000,volume={min(2.0, max(0.0, vol)):.2f},"
+                         f"adelay={ms}:all=1[sx{i}]")
+            labels.append(f"[sx{i}]")
+        chain.append("".join(labels) + f"amix=inputs={len(labels)}:normalize=0:duration=first:dropout_transition=0,"
+                     "alimiter=limit=0.95[amx]")
+        audio_lbl, audio_map, src_audio = "amx", "[amx]", True
+
     # ---- portada como primer cuadro (0.35 s antes del clip; TikTok usa el primer cuadro de portada)
     cover_file = None
-    audio_map = "0:a:0?"
     total = dur
     if opts.get("cover_first"):
         ct = float(opts.get("cover_t") if opts.get("cover_t") not in (None, "") else t_in + 0.5)
@@ -1096,9 +1167,9 @@ def job_render(jid, opts):
         k = add_input(work / "cover.png", ("-loop", "1", "-framerate", "30", "-t", str(cl)))
         chain.append(f"[{k}:v]scale={W}:{H},setsar=1,fps=30,format=yuv420p[cv]")
         chain.append(f"[{last}]fps=30,format=yuv420p[mv]")
-        if has_audio(src):
+        if src_audio:
             chain.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{cl}[sil]")
-            chain.append("[0:a]aresample=48000,aformat=channel_layouts=stereo[ma]")
+            chain.append(f"[{audio_lbl}]aresample=48000,aformat=channel_layouts=stereo[ma]")
             chain.append("[cv][sil][mv][ma]concat=n=2:v=1:a=1[vout][aout]")
             audio_map = "[aout]"
         else:
@@ -1267,6 +1338,46 @@ def api_hook_preview():
     static = request.args.get("crop") == "1" and not request.args.get("text")
     return Response(data, mimetype="image/jpeg",
                     headers={"Cache-Control": "public, max-age=86400" if static else "no-store"})
+
+
+@app.get("/api/sounds")
+def api_sounds():
+    return jsonify(sound_list())
+
+
+@app.post("/api/sounds")
+def api_sounds_upload():
+    f = request.files.get("file")
+    if not f:
+        return jsonify(error="Elige un archivo de audio (mp3, m4a, wav…)"), 400
+    sid = "s" + uuid.uuid4().hex[:8]
+    raw = TMP / f"up_{sid}"
+    f.save(raw)
+    try:  # a mp3, máximo 15 s, volumen igualado al de la biblioteca
+        run_ffmpeg(["-i", str(raw), "-vn", "-t", "15", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                    "-ac", "2", "-ar", "44100", "-b:a", "160k", str(SOUNDS_DIR / f"{sid}.mp3")])
+    except RuntimeError:
+        return jsonify(error="No pude leer ese audio. Prueba con mp3, m4a o wav."), 400
+    finally:
+        raw.unlink(missing_ok=True)
+    name = (request.form.get("name") or Path(f.filename or "Mi sonido").stem)[:30]
+    (SOUNDS_DIR / f"{sid}.json").write_text(json.dumps({"id": sid, "name": name, "emoji": "🎵"},
+                                                       ensure_ascii=False), encoding="utf-8")
+    return jsonify(ok=True, id=sid)
+
+
+@app.delete("/api/sounds/<sid>")
+def api_sounds_delete(sid):
+    if not re.fullmatch(r"s[0-9a-f]{8}", sid):
+        return jsonify(error="Solo se pueden borrar los sonidos que subiste"), 400
+    for ext in ("mp3", "json"):
+        (SOUNDS_DIR / f"{sid}.{ext}").unlink(missing_ok=True)
+    return jsonify(ok=True)
+
+
+@app.get("/sounds/<path:name>")
+def custom_sound(name):
+    return send_from_directory(SOUNDS_DIR, name)
 
 
 @app.get("/api/hook-styles")

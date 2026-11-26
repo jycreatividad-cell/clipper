@@ -197,6 +197,17 @@
   .aiopts{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
   .aiopts button{text-align:left;font-size:13px;font-weight:500;padding:8px 10px;line-height:1.35}
   .aiopts button.on{border-color:#a78bfa;background:#2e1a5c}
+  .sfxgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .sfxgrid button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 2px;font-size:11px;font-weight:600;line-height:1.15}
+  .sfxgrid button b{font-size:22px;line-height:1}
+  .sfxgrid button.sel{border-color:var(--yel);background:#3a3320}
+  .sfxgrid button.mine{border-style:dashed}
+  .sfxlist{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+  .sfxitem{display:flex;align-items:center;gap:8px;background:#121217;border:1px solid var(--line);border-radius:10px;padding:6px 8px;font-size:14px}
+  .sfxitem span{flex:1}
+  .sfxitem button{padding:6px 10px;font-size:13px;min-height:0}
+  .tl-fx{position:absolute;top:2px;width:16px;margin-left:-8px;font-size:12px;text-align:center;pointer-events:none}
+  @media(max-width:980px){.sfxgrid{grid-template-columns:repeat(4,1fr)}}
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
@@ -381,6 +392,21 @@
           <label class="f">Zoom: <span id="zoomV">100%</span></label>
           <input type="range" id="zoom" min="100" max="200" value="100">
         </div>
+      </details>
+
+      <details class="esec" data-sec="sfx"><summary>🔊 Efectos de sonido <span class="sum" id="sumSfx"></span></summary>
+        <p class="mut" style="margin:2px 0 6px">Toca un efecto para escucharlo. Pausa el video donde quieres que suene y toca <b>➕ Agregar</b>.</p>
+        <div class="sfxgrid" id="sfxGrid"></div>
+        <div class="row" style="margin-top:8px">
+          <label class="mut" style="flex:1">Volumen <input type="range" id="sfxVol" min="20" max="200" value="100"></label>
+          <label class="chk" style="flex:0 0 auto"><input type="checkbox" id="sfxZoom"> 🔍 Zoom de impacto</label>
+        </div>
+        <button class="pri" id="sfxAdd" style="width:100%;margin-top:6px">➕ Agregar</button>
+        <div class="sfxlist" id="sfxList"></div>
+        <label class="f">Efecto al empezar cada clip (también en lotes)</label>
+        <select id="sfxIntro"><option value="">Ninguno</option></select>
+        <label class="btnfile" style="display:block;text-align:center;margin-top:10px">🎵 Subir mi sonido (ej. el “faaah”)<input type="file" id="sfxUp" accept="audio/*,video/*,.mp3,.m4a,.wav,.aac,.ogg"></label>
+        <p class="mut" style="margin:4px 0 0">Se guarda en tu biblioteca para todos tus clips (máx. 15 s). Mantén presionado un sonido tuyo para borrarlo.</p>
       </details>
 
       <details class="esec" data-sec="marca"><summary>💧 Marca de agua <span class="sum" id="sumWm"></span></summary>
@@ -739,7 +765,7 @@ function openClip(c) {
   $('#edEmpty').classList.add('hidden'); $('#edBody').classList.remove('hidden');
   vid.src = '/clips/' + c.file + '?t=' + c.created;
   inT = 0; outT = c.duration || 0; showMarks();
-  coverT = null; $('#coverT').textContent = 'inicio del recorte'; setTimeout(updSummaries, 0);
+  coverT = null; $('#coverT').textContent = 'inicio del recorte'; sfxClip = []; setTimeout(renderSfxList, 0);
   vid.onloadedmetadata = () => { if (!outT || outT > vid.duration) outT = vid.duration; showMarks(); updPreview(false); };
   vid.onseeked = vid.onpause = () => updPreview(false);
   renderLists();
@@ -792,6 +818,80 @@ document.querySelectorAll('[data-nudge]').forEach(b => b.onclick = () => {
 $('#goIn').onclick = () => { vid.currentTime = inT; stopAt = outT; vid.play(); };
 $('#goOut').onclick = () => { vid.currentTime = Math.max(inT, outT - 3); stopAt = outT; vid.play(); };
 
+// ---- efectos de sonido
+let sounds = [], sfxSel = 'boom', sfxClip = [];   // sfxClip: [{id, t, vol, zoom}] del clip abierto
+const sfxAudio = {};
+const sfxInfo = id => sounds.find(x => x.id === id);
+function playSfx(id, vol) {
+  const sd = sfxInfo(id); if (!sd) return;
+  const a = sfxAudio[id] || (sfxAudio[id] = new Audio(sd.url));
+  a.volume = Math.min(1, (vol || 100) / 100); a.currentTime = 0; a.play().catch(() => {});
+}
+async function loadSounds() {
+  sounds = await api('/api/sounds');
+  $('#sfxGrid').innerHTML = sounds.map(x => `<button type="button" data-sfx="${x.id}" class="${x.id === sfxSel ? 'sel' : ''} ${x.custom ? 'mine' : ''}"><b>${x.emoji}</b>${x.name.replace(/</g, '&lt;')}</button>`).join('');
+  const cur = $('#sfxIntro').value;
+  $('#sfxIntro').innerHTML = '<option value="">Ninguno</option>' + sounds.map(x => `<option value="${x.id}">${x.emoji} ${x.name.replace(/</g, '&lt;')}</option>`).join('');
+  $('#sfxIntro').value = cur && sfxInfo(cur) ? cur : (localStorage.getItem('sfxIntro') || '');
+  updSfxAdd();
+}
+function updSfxAdd() {
+  const sd = sfxInfo(sfxSel);
+  $('#sfxAdd').textContent = `➕ Agregar ${sd ? sd.emoji + ' ' + sd.name : ''} en ${fmt(vid.currentTime || 0)}`;
+}
+let pressT;
+$('#sfxGrid').addEventListener('pointerdown', e => {
+  const b = e.target.closest('[data-sfx]'); if (!b || !b.classList.contains('mine')) return;
+  pressT = setTimeout(async () => { pressT = null; if (confirm('¿Borrar este sonido de tu biblioteca?')) { await api('/api/sounds/' + b.dataset.sfx, null, 'DELETE'); loadSounds(); } }, 700);
+});
+['pointerup', 'pointerleave'].forEach(ev => $('#sfxGrid').addEventListener(ev, () => clearTimeout(pressT)));
+$('#sfxGrid').addEventListener('click', e => {
+  const b = e.target.closest('[data-sfx]'); if (!b) return;
+  sfxSel = b.dataset.sfx; document.querySelectorAll('#sfxGrid button').forEach(x => x.classList.toggle('sel', x === b));
+  $('#sfxZoom').checked = sfxSel === 'boom';  // el boom va con zoom por defecto
+  playSfx(sfxSel, +$('#sfxVol').value); updSfxAdd();
+});
+$('#sfxAdd').onclick = () => {
+  if (!current) return;
+  sfxClip.push({id: sfxSel, t: +(vid.currentTime || 0).toFixed(2), vol: +$('#sfxVol').value, zoom: $('#sfxZoom').checked});
+  sfxClip.sort((a, b) => a.t - b.t); renderSfxList(); playSfx(sfxSel, +$('#sfxVol').value);
+};
+function renderSfxList() {
+  $('#sfxList').innerHTML = sfxClip.map((x, i) => { const sd = sfxInfo(x.id) || {emoji: '🔊', name: x.id};
+    return `<div class="sfxitem"><span>${sd.emoji} ${sd.name.replace(/</g, '&lt;')} · <b>${fmt(x.t)}</b>${x.zoom ? ' · 🔍' : ''}${x.vol !== 100 ? ' · ' + x.vol + '%' : ''}</span>
+      <button data-sfxgo="${i}">▶</button><button data-sfxdel="${i}">✕</button></div>`; }).join('');
+  document.querySelectorAll('.tl-fx').forEach(e => e.remove());
+  const D = vdur();
+  if (D) sfxClip.forEach(x => { const m = document.createElement('div'); m.className = 'tl-fx'; m.style.left = (x.t / D * 100) + '%';
+    m.textContent = (sfxInfo(x.id) || {emoji: '🔊'}).emoji; $('#tl').appendChild(m); });
+  updSummaries();
+}
+$('#sfxList').addEventListener('click', e => {
+  const g = e.target.dataset.sfxgo, d = e.target.dataset.sfxdel;
+  if (g !== undefined) { vid.currentTime = Math.max(0, sfxClip[+g].t - 1.5); stopAt = sfxClip[+g].t + 2; vid.play(); }
+  if (d !== undefined) { sfxClip.splice(+d, 1); renderSfxList(); }
+});
+$('#sfxIntro').onchange = () => { try { localStorage.setItem('sfxIntro', $('#sfxIntro').value); } catch (e) {} if ($('#sfxIntro').value) playSfx($('#sfxIntro').value); updSummaries(); };
+$('#sfxUp').onchange = async () => {
+  const f = $('#sfxUp').files[0]; if (!f) return;
+  const name = prompt('Nombre del sonido', f.name.replace(/\.[^.]+$/, '').slice(0, 30)); if (name === null) return;
+  const fd = new FormData(); fd.append('file', f); fd.append('name', name);
+  toast('⏳ Subiendo sonido…');
+  const r = await fetch('/api/sounds', {method: 'POST', body: fd}); const j = await r.json().catch(() => ({}));
+  if (!r.ok) return alert(j.error || 'Error');
+  sfxSel = j.id; await loadSounds(); toast('✅ Sonido agregado a tu biblioteca'); $('#sfxUp').value = '';
+};
+// escuchar los efectos mientras se reproduce el video en el editor
+let lastT = 0;
+vid.addEventListener('timeupdate', () => {
+  const t = vid.currentTime;
+  if (!vid.paused && t > lastT && t - lastT < 1) sfxClip.forEach(x => { if (x.t > lastT && x.t <= t) playSfx(x.id, x.vol); });
+  lastT = t; updSfxAdd();
+});
+vid.addEventListener('seeked', () => { lastT = vid.currentTime; updSfxAdd(); });
+vid.addEventListener('loadedmetadata', () => renderSfxList());
+loadSounds().catch(() => {});
+
 // ---- secciones del editor: en celular se abren de a una; resumen de cada una
 const isMobileNow = () => matchMedia('(max-width: 980px)').matches;
 document.querySelectorAll('.esec').forEach(d => {
@@ -816,6 +916,8 @@ function updSummaries() {
   $('#sumSubs').textContent = $('#subs').checked ? '· ' + radio('substyle') : '· apagados';
   $('#sumCover').textContent = $('#coverOn').checked ? '· al inicio' : '· no';
   $('#sumSpeed').textContent = '· ' + (radio('speed') === 'rapido' ? 'rápido' : 'calidad');
+  const nfx = sfxClip.length + ($('#sfxIntro').value ? 1 : 0);
+  $('#sumSfx').textContent = nfx ? `· ${nfx} efecto${nfx > 1 ? 's' : ''}` : '· ninguno';
 }
 document.querySelector('#edBody').addEventListener('input', () => setTimeout(updSummaries, 0));
 document.querySelector('#edBody').addEventListener('change', () => setTimeout(updSummaries, 0));
@@ -842,6 +944,7 @@ function getSettings() {
     logo: $('#logoOn').checked, logo_pos: $('#logoPos').value, logo_size: +$('#logoSize').value, logo_op: +$('#logoOp').value,
     subs: $('#subs').checked && !$('#subs').disabled, subs_style: radio('substyle'), subs_pos: radio('subpos'),
     cover_first: $('#coverOn').checked, cover_text: $('#coverText').value, speed: radio('speed'),
+    sfx_intro: $('#sfxIntro').value,
   };
 }
 const SAVE_IDS = ['wm', 'wmPos', 'wmOp', 'logoOn', 'logoPos', 'logoSize', 'logoOp', 'subs', 'coverOn'];
@@ -863,7 +966,7 @@ $('#wmOpV').textContent = $('#wmOp').value + '%';
 $('#btnRender').onclick = async () => {
   if (!current) return;
   saveSettings();
-  await api('/api/render', {clip_id: current.id, in: inT, out: outT, ...getSettings(),
+  await api('/api/render', {clip_id: current.id, in: inT, out: outT, ...getSettings(), sfx: sfxClip,
     cover_t: coverT === null ? null : coverT});
   if (mobile()) goTab('clips');
   refresh();
