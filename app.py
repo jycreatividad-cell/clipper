@@ -729,20 +729,19 @@ def job_capture_anchor(jid, num, off, before, after, label):
     update_job(jid, result=capture_anchor(jid, num, off, before, after, label))
 
 
-def job_moments(jid, d):
-    """Busca las tomas importantes en el buffer del directo o en una captura."""
+def detect_moments(jid, d):
+    """Busca las tomas importantes en el buffer del directo o en una captura. -> (lista, fuente)"""
     before, after = float(d.get("before", 20)), float(d.get("after", 8))
     top = int(d.get("top", 8))
     if d.get("clip_id"):
         meta = json.loads(meta_path(d["clip_id"]).read_text(encoding="utf-8"))
         update_job(jid, progress=20)
         lv = moments.loudness_curve(["-i", str(CLIPS / meta["file"])])
-        found = moments.find_moments(lv, top=top, before=before, after=after,
-                                     total=meta.get("duration"), min_gap=max(12.0, before))
+        found = moments.find_moments(lv, top=top, before=before, after=after, total=meta.get("duration"),
+                                     min_gap=max(12.0, before), min_score=float(d.get("min_score", 3.0)))
         for m in found:
             m.update(kind="capture", clip_id=d["clip_id"])
-        update_job(jid, result={"moments": found, "source": meta.get("label")})
-        return
+        return found, meta.get("label")
     minutes = float(d.get("minutes", 10))
     work = TMP / ("mom_" + jid)
     work.mkdir()
@@ -760,14 +759,50 @@ def job_moments(jid, d):
     lv = moments.loudness_curve(["-f", "concat", "-safe", "0", "-i", str(work / "list.txt")])
     shutil.rmtree(work, ignore_errors=True)
     found = moments.find_moments(lv, top=top, before=before, after=after, total=total - w0,
-                                 min_gap=max(12.0, before))
+                                 min_gap=max(12.0, before), min_score=float(d.get("min_score", 3.0)))
     for m in found:
         absolute = w0 + m["t"]
         row = next((r for r in rows if r[2] <= absolute < r[2] + r[3]), rows[-1])
         m.update(kind="anchor", seg=row[0], off=round(absolute - row[2], 2),
                  ago=round(total - absolute), before=before, after=after)
-    found.sort(key=lambda m: m["ago"], reverse=True)
-    update_job(jid, result={"moments": found, "source": f"últimos {int(minutes)} min"})
+    return found, f"últimos {int(minutes)} min"
+
+
+def job_moments(jid, d):
+    found, source = detect_moments(jid, d)
+    if not d.get("clip_id"):
+        found.sort(key=lambda m: m["ago"], reverse=True)
+    update_job(jid, result={"moments": found, "source": source})
+
+
+def job_auto_clips(jid, d):
+    """Botón mágico: busca los N mejores momentos y crea los N clips de una vez."""
+    n = max(1, min(10, int(d.get("count", 5))))
+    # min_score bajo: si hay pocos picos muy claros, completa con los siguientes mejores
+    found, source = detect_moments(jid, dict(d, top=max(n, 10), min_score=0.8))
+    if not found:
+        raise RuntimeError("No encontré momentos fuertes. Prueba analizar más minutos o espera a que pase algo.")
+    best = sorted(found, key=lambda m: m["score"], reverse=True)[:n]
+    best.sort(key=lambda m: m.get("ago", 0), reverse=True) if best[0]["kind"] == "anchor" else best.sort(key=lambda m: m["start"])
+    settings = dict(d.get("settings") or {})
+    hooks_pool = [h for h in (d.get("hooks") or []) if h.strip()]
+    if not d.get("with_hook"):
+        settings["hook"] = ""
+        settings["cover_first"] = False if not settings.get("cover_text") else settings.get("cover_first")
+    ids = []
+    for i, m in enumerate(best, 1):
+        label = f"Mejor momento {i}/{len(best)}" + (f" · hace {fmt_t(m['ago'])}" if m.get("ago") is not None else "")
+        if m["kind"] == "anchor":
+            item = {"kind": "anchor", "seg": m["seg"], "off": m["off"], "before": m["before"], "after": m["after"]}
+        else:
+            item = {"kind": "capture", "clip_id": m["clip_id"], "in": m["start"], "out": m["end"]}
+        item["label"] = label
+        item["hook"] = (hooks_pool[(i - 1) % len(hooks_pool)] if hooks_pool else settings.get("hook", "")) if d.get("with_hook") else ""
+        cid = new_job("render", label)
+        run_job(cid, job_batch_item, item, dict(settings, _label=label))
+        ids.append(cid)
+    extra = f" (solo encontré {len(ids)} momentos distintos)" if len(ids) < n else ""
+    update_job(jid, label=f"✅ {len(ids)} clip{'s' if len(ids) != 1 else ''} en camino · {source}{extra}", result={"jobs": ids})
 
 
 def job_batch_item(jid, item, settings):
@@ -1194,6 +1229,7 @@ def job_render(jid, opts):
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
                     "cover": cover_file.name if cover_file else None, "cat": opts.get("hook_cat"),
                     "transcript": opts.get("_transcript"),
+                    "people": sorted(set((opts.get("people") or []) + people_in_text(opts.get("_transcript")))),
                     "label": hook.replace("*", "")[:60] or src_meta.get("label") or f"Clip {fmt} {dur:.0f}s"})
     update_job(jid, result=rid)
     return rid
@@ -1490,6 +1526,68 @@ def api_moments():
     jid = new_job("momentos", "Buscando tomas importantes…")
     run_job(jid, job_moments, d)
     return jsonify(job=jid)
+
+
+@app.post("/api/auto-clips")
+def api_auto_clips():
+    d = request.json or {}
+    if not d.get("clip_id") and not rec.segments():
+        return jsonify(error="Inicia la grabación del directo (o abre una captura larga) primero."), 400
+    kind = "con hook" if d.get("with_hook") else "sin hook"
+    jid = new_job("auto", f"Buscando los {int(d.get('count', 5))} mejores momentos ({kind})…")
+    run_job(jid, job_auto_clips, d)
+    return jsonify(job=jid)
+
+
+# ---- participantes (etiquetas manuales; sin reconocimiento facial)
+PEOPLE = DATA / "participantes.json"
+
+
+def people_list():
+    try:
+        return json.loads(PEOPLE.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+@app.get("/api/people")
+def api_people():
+    return jsonify(people_list())
+
+
+@app.post("/api/people")
+def api_people_add():
+    d = request.json or {}
+    name = re.sub(r"\s+", " ", (d.get("name") or "")).strip()[:40]
+    if not name:
+        return jsonify(error="Escribe el nombre"), 400
+    tag = (d.get("hashtag") or "").strip().lstrip("#")
+    tag = re.sub(r"[^\wáéíóúñÁÉÍÓÚÑ]", "", tag) or re.sub(r"[^\wáéíóúñÁÉÍÓÚÑ]", "", name.title())
+    lst = people_list()
+    if any(p["name"].lower() == name.lower() for p in lst):
+        return jsonify(error="Ya está en la lista"), 400
+    lst.append({"id": uuid.uuid4().hex[:6], "name": name, "hashtag": tag,
+                "alias": [a.strip() for a in (d.get("alias") or "").split(",") if a.strip()][:5]})
+    PEOPLE.write_text(json.dumps(lst, ensure_ascii=False, indent=1), encoding="utf-8")
+    return jsonify(lst)
+
+
+@app.delete("/api/people/<pid>")
+def api_people_delete(pid):
+    lst = [p for p in people_list() if p["id"] != pid]
+    PEOPLE.write_text(json.dumps(lst, ensure_ascii=False, indent=1), encoding="utf-8")
+    return jsonify(lst)
+
+
+def people_in_text(text):
+    """Participantes cuyo nombre (o apodo) se menciona en lo que se dice."""
+    low = " " + re.sub(r"[^\wáéíóúñ ]", " ", (text or "").lower()) + " "
+    found = []
+    for p in people_list():
+        names = [p["name"]] + p.get("alias", [])
+        if any(f" {n.lower()} " in low for n in names if len(n) >= 3):
+            found.append(p["id"])
+    return found
 
 
 @app.get("/api/job/<jid>")

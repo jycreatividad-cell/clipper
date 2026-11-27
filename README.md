@@ -90,6 +90,24 @@ En el celular la app se organiza en pestañas abajo: **🔴 Directo · ✂️ Ed
 > PC, puedes abrirla desde el iPhone en la misma red Wi-Fi con `HOST=0.0.0.0` y la IP de la PC
 > (ej. `http://192.168.1.20:5055`), pero así no se puede instalar a pantalla completa con https.
 
+## ✨ Clips automáticos de los mejores momentos
+
+En **🔴 Directo → Capturar** hay dos botones:
+- **🔥 Crear clips CON hook**: busca las tomas más fuertes de los últimos minutos del directo (o de la
+  captura abierta) y crea 3, 5, 8 o 10 clips, cada uno con un hook distinto de la categoría elegida.
+- **🎬 Crear clips SIN hook**: lo mismo, solo el video limpio.
+
+Usan la configuración del editor (plantilla, formato, subtítulos, marca de agua, efecto al empezar…).
+Si hay pocos momentos muy claros, completa con los siguientes mejores.
+
+## 👥 Participantes
+
+En **🎬 Clips → Participantes de La Casa** agrega los nombres (con hashtag y apodos opcionales).
+En el editor, **👥 ¿Quién sale?** marca a quienes aparecen: sus nombres van al copy y sus hashtags al
+final. Con subtítulos activos, si en el clip se menciona un nombre o apodo de la lista, se marca solo.
+En la lista de clips puedes filtrar por participante.
+*La app no reconoce caras (reconocimiento facial): las etiquetas son manuales o por nombres mencionados.*
+
 ## ⚡ Clips más rápido
 
 - **📍 Marcar momento (tecla `M`)**: mientras ves el directo, aprieta `M` cuando pase algo. Queda

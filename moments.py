@@ -54,7 +54,7 @@ def _median(vals):
     return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
 
 
-def find_moments(levels, top=8, min_gap=25.0, before=20.0, after=8.0, total=None):
+def find_moments(levels, top=8, min_gap=25.0, before=20.0, after=8.0, total=None, min_score=3.0):
     """-> lista de momentos ordenados por intensidad: {t, start, end, score, stars}."""
     if not levels:
         return []
@@ -76,7 +76,7 @@ def find_moments(levels, top=8, min_gap=25.0, before=20.0, after=8.0, total=None
     chosen = []
     gap = int(min_gap / STEP)
     for i in order:
-        if scores[i] < 3.0 or len(chosen) >= top:
+        if scores[i] < min_score or len(chosen) >= top:
             break
         if all(abs(i - j) >= gap for j in chosen):
             chosen.append(i)
