@@ -155,6 +155,9 @@ def render_hook(text, style_id=DEFAULT_STYLE, width=1080, scale=1.0, height=None
     if style_id and style_id.startswith("t:"):
         import templates
         return templates.render_template(text, style_id[2:], width, height or 1920, scale=scale, **tpl)
+    if style_id and style_id.startswith("x:"):
+        import textstyles
+        return textstyles.render_form(text, style_id[2:], width, height or 1920, scale=scale, **tpl)
     st = STYLES.get(style_id, STYLES[DEFAULT_STYLE])
     size = max(18, int(width * st["size"] * scale))
     font = _font(st["font"], size, st.get("weight"))

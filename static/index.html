@@ -235,6 +235,14 @@
   .switch input:checked+span::before{transform:translateX(24px)}
   .draftb{position:absolute;right:6px;top:6px;z-index:2;background:#7c3aed;color:#fff;font-size:11px;font-weight:800;padding:3px 8px;border-radius:12px}
   .keepb.on{color:var(--yel)}
+  .styles.frm img{aspect-ratio:4/3;background:#2b2018}
+  .qitem{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#121217;font-size:14px}
+  .qitem .t{flex:1;min-width:0}
+  .qitem .t b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qst{font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:#26262e}
+  .qst.pendiente{background:#3b2a5c;color:#d8c7ff}.qst.publicado{background:#14532d;color:#bbf7d0}
+  .qst.avisado{background:#3a3320;color:#ffe59a}.qst.error{background:#5b1620;color:#ffc2cb}
+  .views{font-size:11px;color:#8ec5ff;padding:0 6px}
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
@@ -410,9 +418,15 @@
       <details class="esec" open data-sec="estilo"><summary>🎨 Estilo del hook <span class="sum" id="sumStyle"></span></summary>
         <div class="seg" style="margin-bottom:8px">
           <label><input type="radio" name="sgroup" value="templates" checked><span>⭐ PRO (15)</span></label>
+          <label><input type="radio" name="sgroup" value="forms"><span>✍️ Formas (8)</span></label>
           <label><input type="radio" name="sgroup" value="simple"><span>Simples (10)</span></label>
         </div>
         <div class="styles" id="styles"></div>
+      <div id="formOpts" class="tplbox hidden">
+        <label class="f" id="formLabelL">Nombre / etiqueta</label>
+        <input type="text" id="formLabel" placeholder="">
+        <p class="mut" id="formHint" style="margin:6px 0 0"></p>
+      </div>
       <div id="tplOpts" class="tplbox hidden">
         <div class="row">
           <div><label class="f">Encabezado</label><input type="text" id="tplBadge" placeholder=""></div>
@@ -577,6 +591,21 @@
   </div>
 
   <div data-tab="clips" class="card">
+    <h2>📅 Cola de publicación <span class="mut" id="queueCount"></span></h2>
+    <div class="list" id="queueList"><p class="mut">Nada programado. Programa un clip desde 🚀, o reparte los mejores:</p></div>
+    <div class="row" style="margin-top:8px">
+      <select id="spreadN" style="flex:0 0 auto;width:auto"><option value="3" selected>3 mejores</option><option value="5">5 mejores</option><option value="9">9 mejores</option></select>
+      <button class="pri" id="spreadGo">✨ Repartir en las próximas horas pico</button>
+    </div>
+    <p class="mut" style="margin:6px 0 0">Horas pico RD: 12:00 pm, 7:00 pm y 10:00 pm. Con cuentas conectadas se publica solo; si no, te aviso a la hora para publicar con un toque.</p>
+  </div>
+
+  <div data-tab="clips" class="card">
+    <h2>📈 Lo que funciona en tu página</h2>
+    <div id="learnBox" class="mut">Anota las vistas reales de tus clips (botón 📈 en cada uno). Con 5 o más, el porcentaje viral aprende qué le funciona a tu página.</div>
+  </div>
+
+  <div data-tab="clips" class="card">
     <h2>👥 Participantes de La Casa</h2>
     <div class="chips" id="peopleAdmin"></div>
     <div class="row" style="margin-top:8px">
@@ -649,6 +678,10 @@
     <label><input type="radio" name="ttmode" value="direct"><span>Publicar directo</span></label>
   </div>
   <div class="row"><button id="pubCancel">Cerrar</button><button class="pri" id="pubGo">Publicar automático</button></div>
+  <h3 style="font-size:14px;margin:14px 0 2px">📅 Programar en hora pico</h3>
+  <p class="mut" style="margin:0" id="schedHint"></p>
+  <div class="chips" id="schedPeaks" style="margin:6px 0"></div>
+  <div class="row"><input type="datetime-local" id="schedCustom" style="flex:1;min-width:0"><button id="schedGo">📅 Programar</button></div>
 </div></div>
 
 <script src="/static/alofoke.js"></script>
@@ -704,10 +737,22 @@ try { hookStyle = localStorage.getItem('hookStyle') || 't:viral'; } catch (e) {}
 const fmtSel = () => document.querySelector('[name=fmt]:checked').value;
 const hposSel = () => document.querySelector('[name=hpos]:checked').value;
 const groupSel = () => document.querySelector('[name=sgroup]:checked').value;
-if (!hookStyle.startsWith('t:')) document.querySelector('[name=sgroup][value=simple]').checked = true;
-let styleData = {simple: [], templates: []};
+if (hookStyle.startsWith('x:')) document.querySelector('[name=sgroup][value=forms]').checked = true;
+else if (!hookStyle.startsWith('t:')) document.querySelector('[name=sgroup][value=simple]').checked = true;
+let styleData = {simple: [], templates: [], forms: []};
+const FORM_HELP = {
+  'x:chat': ['Quién manda el mensaje', 'La Casa 🏠', 'Burbuja de chat. Deja vacío para el nombre por defecto.'],
+  'x:tweet': ['Nombre de la cuenta', 'Clips de La Casa', 'Tarjeta de publicación con tu @ de la marca de agua.'],
+  'x:comentario': ['Usuario del comentario', '@fan_de_la_casa', 'Formato "Respondiendo al comentario de…".'],
+  'x:encuesta': ['(no se usa)', '', 'Escribe: ¿Pregunta? | Opción 1 | Opción 2 (sin opciones sale SÍ / NO).'],
+  'x:titular': ['Etiqueta roja', 'ÚLTIMA HORA', 'Titular de noticia con banda roja.'],
+  'x:sticker': ['(no se usa)', '', 'Letras con borde blanco grueso, como sticker.'],
+  'x:cinta': ['(no se usa)', '', 'Cada línea sobre una cinta adhesiva.'],
+  'x:resaltador': ['(no se usa)', '', 'Marcador amarillo detrás de cada línea.'],
+};
 const tplInfo = id => styleData.templates.find(t => t.id === id);
 function tplParams() {   // opciones editables de la plantilla elegida
+  if (hookStyle.startsWith('x:')) return $('#formLabel').value.trim() ? {tpl_badge: $('#formLabel').value.trim()} : {};
   if (!hookStyle.startsWith('t:')) return {};
   const p = {tpl_panel: $('#tplPanel').checked ? 1 : 0};
   if ($('#tplNoBadge').checked) p.tpl_badge = '';
@@ -736,6 +781,9 @@ let gridKey = '';
 let styleList = [];
 fetch('/api/hook-styles').then(r => r.json()).then(d => { styleData = d; syncTplFields(); updPreview(true); });
 function syncTplFields() {
+  const fh = FORM_HELP[hookStyle];
+  $('#formOpts').classList.toggle('hidden', !fh);
+  if (fh) { $('#formLabelL').textContent = fh[0]; $('#formLabel').placeholder = fh[1]; $('#formLabel').disabled = !fh[1]; $('#formHint').textContent = fh[2]; }
   const t = tplInfo(hookStyle);
   $('#tplOpts').classList.toggle('hidden', !t);
   if (!t) return;
@@ -749,9 +797,10 @@ function updPreview(all) {
   pvTimer = setTimeout(() => {
     all = pvAll; pvAll = false;
     $('#hsizeV').textContent = $('#hsize').value + '%';
-    styleList = groupSel() === 'templates' ? styleData.templates : styleData.simple;
+    styleList = groupSel() === 'templates' ? styleData.templates : groupSel() === 'forms' ? (styleData.forms || []) : styleData.simple;
     $('#styles').classList.toggle('tpl', groupSel() === 'templates');
-    const key = groupSel() + '|' + (fmtSel() === 'horizontal');
+    $('#styles').classList.toggle('frm', groupSel() === 'forms');
+    const key = groupSel() + '|' + (fmtSel() === 'horizontal') + '|' + styleList.length;
     if ((all && key !== gridKey) || !$('#styles').children.length) {
       gridKey = key;
       $('#styles').innerHTML = styleList.map(s => `<button type="button" data-style="${s.id}" class="${s.id === hookStyle ? 'sel' : ''}">
@@ -765,8 +814,10 @@ $('#styles').onclick = e => {
   hookStyle = b.dataset.style; try { localStorage.setItem('hookStyle', hookStyle); } catch (e) {}
   document.querySelectorAll('#styles button').forEach(x => x.classList.toggle('sel', x === b));
   $('#tplBadge').value = ''; $('#tplIcon').value = ''; $('#tplAccentAuto').checked = true; $('#tplNoBadge').checked = false;
+  $('#formLabel').value = '';
   syncTplFields(); updPreview(false);
 };
+$('#formLabel').addEventListener('input', () => updPreview(false));
 document.querySelectorAll('[name=sgroup]').forEach(e => e.addEventListener('change', () => updPreview(true)));
 ['#tplBadge', '#tplIcon', '#tplAccent', '#tplAccentAuto', '#tplPanel', '#tplNoBadge'].forEach(id =>
   $(id).addEventListener('input', () => { if (id === '#tplAccent') $('#tplAccentAuto').checked = false; updPreview(false); }));
@@ -778,7 +829,7 @@ document.querySelectorAll('[name=hpos]').forEach(e => e.addEventListener('change
 // copy = frase de la categoría + hashtags de La Casa + hashtags de cada red
 // copy distinto según el hook y el tipo de momento
 function hookPlain(h) {
-  let t = (h || '').replace(/\*/g, '').replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0F\u200D]/gu, '').replace(/\s+/g, ' ').trim();
+  let t = (h || '').split('|')[0].replace(/\*/g, '').replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0F\u200D]/gu, '').replace(/\s+/g, ' ').trim();
   if (!t) return '';
   t = t.toLowerCase().replace(/(^|[.!?¡¿]\s*)([a-záéíóúñ])/g, (m, a, b) => a + b.toUpperCase());
   return t.replace(/\balofoke\b/gi, 'Alofoke').replace(/\brd\b/gi, 'RD').replace(/^[¿¡\s]+|[?!.\s]+$/g, '');
@@ -804,7 +855,7 @@ function smartCopy(hook, cat) {
     if (!h || !pool.length || Math.random() < 0.2) { out = pick(c.copys); continue; }
     out = pick(pool).t.replace('{h}', h);
     const cierres = (AF.cierres || {})[k];
-    if (cierres && !out.includes('?') && Math.random() < 0.6) {
+    if (cierres && !out.includes('?') && !/(👇|comentarios|comenta)/iu.test(out) && Math.random() < 0.6) {
       if (/[a-záéíóúñ0-9]$/i.test(out)) out += '.';
       out += ' ' + pick(cierres);
     }
@@ -1027,7 +1078,7 @@ document.querySelectorAll('.esec').forEach(d => {
 function updSummaries() {
   const h = $('#hook').value.replace(/\*/g, '').trim();
   $('#sumHook').textContent = h ? '· ' + h : '· sin texto';
-  const all = [...(styleData.templates || []), ...(styleData.simple || [])];
+  const all = [...(styleData.templates || []), ...(styleData.simple || []), ...(styleData.forms || [])];
   const st = all.find(x => x.id === hookStyle);
   $('#sumStyle').textContent = st ? '· ' + st.name : '';
   $('#sumFmt').textContent = '· ' + ({vertical: '9:16', cuadrado: '1:1', horizontal: '16:9'}[radio('fmt')]) + (radio('fmt') !== 'horizontal' ? (radio('mode') === 'fill' ? ' completa' : ' borroso') : '');
@@ -1106,7 +1157,7 @@ function applyStyle(st) {
   chk('coverOn', st.cover_first); if (st.speed) setRadio('speed', st.speed);
   if (st.format) setRadio('fmt', st.format); if (st.mode) setRadio('mode', st.mode);
   if (st.hook_pos) setRadio('hpos', st.hook_pos); val('hsize', st.hook_size);
-  if (st.hook_style) { hookStyle = st.hook_style; setRadio('sgroup', st.hook_style.startsWith('t:') ? 'templates' : 'simple'); }
+  if (st.hook_style) { hookStyle = st.hook_style; setRadio('sgroup', st.hook_style.startsWith('t:') ? 'templates' : st.hook_style.startsWith('x:') ? 'forms' : 'simple'); }
   if (st.sfx_intro !== undefined) { try { localStorage.setItem('sfxIntro', st.sfx_intro || ''); } catch (e) {} $('#sfxIntro').value = st.sfx_intro || ''; }
   if (st.hook_cat) { hookCat = st.hook_cat; renderHookCats(); }
   $('#wmOpV').textContent = $('#wmOp').value + '%';
@@ -1118,6 +1169,65 @@ $('#btnStyle').onclick = async () => { applyStyle(await api('/api/style', getSet
 const CTX_IDEAS = ['● EN VIVO · LA CASA DE ALOFOKE 3', 'LA CASA DE ALOFOKE 3', '● EN VIVO', '● EN VIVO · DÍA 1', 'LO QUE NO VISTE 👀', 'MOMENTO DEL DÍA 🔥'];
 $('#ctxIdeas').innerHTML = CTX_IDEAS.map(t => `<button type="button">${t}</button>`).join('');
 $('#ctxIdeas').onclick = e => { if (e.target.tagName === 'BUTTON') { $('#ctxText').value = e.target.textContent; $('#ctxOn').checked = true; updSummaries(); } };
+
+
+// ---- cola de publicación
+let queue = {items: [], peaks: []}, schedWhen = null;
+async function loadQueue() {
+  queue = await api('/api/queue');
+  const esc = t => String(t || '').replace(/</g, '&lt;');
+  const pend = queue.items.filter(i => i.status === 'pendiente');
+  $('#queueCount').textContent = pend.length ? `· ${pend.length} pendiente${pend.length > 1 ? 's' : ''}` : '';
+  const show = queue.items.filter(i => i.status !== 'publicado' || Date.now() / 1000 - i.when < 86400);
+  $('#queueList').innerHTML = show.length ? show.map(i => `<div class="qitem">
+      <div class="t"><b>${esc(i.label)}</b><span class="mut">${i.when_label} · ${i.mode === 'auto' ? '🤖 ' + i.targets.join(', ') : '🔔 aviso'}${i.msg ? ' · ' + esc(i.msg) : ''}</span></div>
+      <span class="qst ${i.status}">${i.status}</span>
+      ${i.status === 'pendiente' ? `<button data-qdel="${i.id}" style="padding:5px 9px;min-height:0">✕</button>` : ''}</div>`).join('')
+    : '<p class="mut">Nada programado. Programa un clip desde 🚀, o reparte los mejores:</p>';
+  $('#schedPeaks').innerHTML = queue.peaks.slice(0, 4).map((p, k) => `<button type="button" data-peak="${p.t}" class="${(schedWhen ?? queue.peaks[0].t) === p.t ? 'on' : ''}">${p.label}</button>`).join('');
+}
+$('#queueList').onclick = async e => { const q = e.target.dataset.qdel; if (q) { await api('/api/queue/' + q, null, 'DELETE'); loadQueue(); } };
+$('#schedPeaks').onclick = e => { const b = e.target.closest('[data-peak]'); if (!b) return; schedWhen = +b.dataset.peak; $('#schedCustom').value = '';
+  document.querySelectorAll('#schedPeaks button').forEach(x => x.classList.toggle('on', x === b)); };
+$('#schedCustom').oninput = () => { schedWhen = null; document.querySelectorAll('#schedPeaks button').forEach(x => x.classList.remove('on')); };
+function autoTargets() { return [['facebook', '#pubFb'], ['instagram', '#pubIg'], ['tiktok', '#pubTt']].filter(([, id]) => $(id).checked && !$(id).disabled).map(([t]) => t); }
+$('#schedGo').onclick = async () => {
+  if (!pubClip) return;
+  let when = schedWhen ?? (queue.peaks[0] || {}).t;
+  if ($('#schedCustom').value) when = new Date($('#schedCustom').value).getTime() / 1000;
+  const targets = autoTargets();
+  const it = await api('/api/queue', {clip_id: pubClip.id, when, targets, caption: withTags($('#pubCaption').value, targets[0] || 'tiktok'), tiktok_mode: radio('ttmode')});
+  toast(it.mode === 'auto' ? `📅 Se publicará solo en ${it.targets.join(', ')}` : '📅 Programado: te aviso a esa hora para publicarlo', 5000);
+  $('#pubCancel').click(); loadQueue();
+};
+$('#spreadGo').onclick = async () => {
+  const st = state.social || {};
+  const targets = ['facebook', 'instagram', 'tiktok'].filter(t => st[t]);
+  const r = await api('/api/queue/spread', {count: +$('#spreadN').value, targets});
+  toast(`✨ ${r.items.length} clips repartidos en horas pico`, 4000); loadQueue();
+};
+loadQueue().catch(() => {});
+setInterval(() => { if (!document.hidden) loadQueue().catch(() => {}); }, 30000);
+
+// ---- vistas reales y aprendizaje
+async function loadLearn() {
+  const L = await api('/api/learn');
+  const names = {momento: 'Momento', arranque: 'Arranque', duracion: 'Duración', hook: 'Hook', palabras: 'Palabras', formato: 'Formato'};
+  if (!L.n || L.n < 5) { $('#learnBox').innerHTML = `Anota las vistas reales de tus clips (botón 📈 en cada uno). Llevas <b>${L.n || 0}</b> de 5 para que el porcentaje empiece a aprender de tu página.`; return; }
+  const top = Object.entries(L.corr || {}).sort((a, b) => b[1] - a[1])[0];
+  const lead = top && top[1] >= 0.15 ? `en tu página lo que más se nota es <b>${names[top[0]]}</b>` : 'todavía no hay una señal clara: sigue anotando vistas';
+  $('#learnBox').innerHTML = `<p style="margin:0 0 6px">Con <b>${L.n}</b> clips con vistas, ${lead}.</p>` +
+    '<div class="vdetail">' + Object.keys(names).map(k => `<div class="vbar">${names[k]}<span><i style="width:${Math.round(L.weights[k] * 250)}%"></i></span>${Math.round(L.weights[k] * 100)}%</div>`).join('') + '</div>' +
+    `<p class="mut" style="margin:6px 0 0">Peso de cada señal en el porcentaje viral (al empezar: 30/20/15/15/10/10). ${L.n < 15 ? 'Con 15 clips confía del todo en tus datos.' : ''}</p>`;
+}
+loadLearn().catch(() => {});
+async function askViews(c) {
+  const v = prompt('¿Cuántas vistas tiene este clip? (ej. 12500 o 12.5k)', c.stats ? c.stats.views : '');
+  if (v === null || !v.trim()) return;
+  const r = await api('/api/stats/' + c.id, {views: v});
+  toast(`📈 Guardado: ${r.stats.views.toLocaleString('es-DO')} vistas`); lastSig = ''; refresh(); loadLearn();
+}
+const fmtViews = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n);
 
 // ---- piloto automático
 let plSig = '';
@@ -1418,6 +1528,11 @@ function openPublish(c) {
     clipFile(c).then(() => { $('#pubPrep').textContent = '· listo ✅'; document.querySelectorAll('.netbtns button').forEach(b => b.disabled = false); })
       .catch(() => { $('#pubPrep').textContent = ''; document.querySelectorAll('.netbtns button').forEach(b => b.disabled = false); });
   } else $('#pubPrep').textContent = '';
+  schedWhen = null; $('#schedCustom').value = '';
+  const anyAcc = so.facebook || so.instagram || so.tiktok;
+  $('#schedHint').textContent = anyAcc ? 'Se publicará solo en las redes marcadas arriba (publicar automático).'
+    : 'Sin cuentas conectadas: a esa hora te llega un aviso al teléfono para publicarlo con un toque.';
+  loadQueue().catch(() => {});
   $('#pubModal').classList.remove('hidden');
 }
 $('#pubCaption').addEventListener('input', () => { if (pubClip) pubClip.caption = $('#pubCaption').value; });
@@ -1509,7 +1624,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 // ---- estado
 let lastSig = '';
 function renderLists() {
-  const sig = (state.clips || []).map(c => c.id + ((c.viral || {}).score || '') + (c.keep ? 'k' : '')).join() + '|' + (current ? current.id : '');
+  const sig = (state.clips || []).map(c => c.id + ((c.viral || {}).score || '') + (c.keep ? 'k' : '') + ((c.stats || {}).views || '')).join() + '|' + (current ? current.id : '');
   if (sig === lastSig) return; lastSig = sig;
   const caps = (state.clips || []).filter(c => c.type === 'captura');
   $('#caps').innerHTML = caps.length ? caps.map(c => `
@@ -1536,11 +1651,13 @@ function renderLists() {
       <video src="/clips/${c.file}" controls preload="metadata" playsinline ${c.cover ? `poster="/clips/${c.cover}"` : ''}></video>
       <div class="mut" style="padding:4px 6px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.label)}</div>
       ${(c.people || []).length ? `<div class="ppl">👥 ${esc(peopleNames(c.people).join(', '))}</div>` : ''}
+      ${c.stats ? `<div class="views">👁 ${fmtViews(c.stats.views)} vistas</div>` : ''}
       ${c.type === 'borrador' ? `<div class="a"><button class="pri" data-approve="${c.id}">✅ Aprobar final</button><button data-del="${c.id}" title="Descartar">🗑</button></div>` : `
       <div class="a"><a class="btn" href="/clips/${c.file}?dl=1" title="Descargar">⬇</a>
         <button data-share="${c.id}" title="Compartir o Guardar en Fotos (TikTok, Instagram, Facebook…)">📲</button>
         <button data-pub="${c.id}" title="Publicar en TikTok, Instagram, Facebook…">🚀</button>
         <button data-keep="${c.id}" class="keepb ${c.keep ? 'on' : ''}" title="Guardar (no se borra en la limpieza)">${c.keep ? '⭐' : '☆'}</button>
+        <button data-views="${c.id}" title="Anotar vistas reales">📈</button>
         <button data-del="${c.id}" title="Borrar">🗑</button></div>`}
       ${c.cover ? `<div class="a" style="padding-top:0"><a class="btn" href="/clips/${c.cover}?dl=1">⬇ Portada</a></div>` : ''}
     </div>`).join('') : '<p class="mut">Aquí salen tus clips renderizados.</p>';
@@ -1548,7 +1665,8 @@ function renderLists() {
 document.body.addEventListener('click', async e => {
   const o = e.target.dataset.open, d = e.target.dataset.del, sh = e.target.dataset.share, pb = e.target.dataset.pub;
   if (sh) shareClip(state.clips.find(c => c.id === sh), e.target);
-  const ap = e.target.dataset.approve, kp = e.target.dataset.keep;
+  const ap = e.target.dataset.approve, kp = e.target.dataset.keep, vw = e.target.dataset.views;
+  if (vw) askViews(state.clips.find(c => c.id === vw));
   if (ap) { await api('/api/approve/' + ap, {}); toast('✅ Haciendo la versión final…'); refresh(); }
   if (kp) { await api('/api/keep/' + kp, {}); lastSig = ''; refresh(); }
   const vb = e.target.closest && e.target.closest('[data-viral]');
@@ -1558,6 +1676,7 @@ document.body.addEventListener('click', async e => {
   if (d && confirm('¿Borrar?')) { await api('/api/clip/' + d, null, 'DELETE'); if (current && current.id === d) current = null; refresh(); }
 });
 
+let pubFromUrl = new URLSearchParams(location.search).get('pub');
 async function refresh() {
   state = await api('/api/status');
   const r = state.recorder;
@@ -1598,6 +1717,7 @@ async function refresh() {
   const fresh = caps.find(c => !seenCaps.has(c.id) && !c.auto);
   caps.forEach(c => seenCaps.add(c.id));
   if (!firstLoad && fresh) openClip(fresh); else renderLists();
+  if (pubFromUrl) { const c = state.clips.find(x => x.id === pubFromUrl); pubFromUrl = null; history.replaceState(null, '', '/#clips'); if (c) { goTab('clips'); openPublish(c); } }
   firstLoad = false;
 }
 refresh();

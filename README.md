@@ -107,6 +107,34 @@ En 🎬 Clips puedes ordenar por **🔥 Más virales**.
 - **🏷️ Texto de contexto**: etiqueta pequeña y semitransparente arriba o debajo del video
   (empieza con ● para el punto rojo de "en vivo"). Opción para numerar los lotes: PARTE 1/5…
 
+## ✍️ Formas de texto
+
+En el editor → **🎨 Estilo del hook → ✍️ Formas (8)**: 💬 Mensaje de chat, 🐦 Publicación (con tu @),
+🗨️ Respuesta a comentario, 📊 Encuesta (`¿Pregunta? | Opción 1 | Opción 2`), 📰 Titular de noticia,
+🏷️ Sticker, 🎞️ Cinta adhesiva y 🖍️ Resaltador. El campo de abajo cambia el nombre o la etiqueta
+(remitente del chat, nombre de la cuenta, @usuario del comentario, etiqueta del titular).
+
+## 📅 Cola de publicación
+
+- En la ventana 🚀 de un clip → **📅 Programar en hora pico** (hoy 12:00 pm, 7:00 pm, 10:00 pm…) u otra hora.
+- En 🎬 Clips → **✨ Repartir en las próximas horas pico**: toma los 3/5/9 clips con mejor % viral y los
+  reparte en las horas pico libres.
+- Con cuentas conectadas se publica solo; sin cuentas, a la hora te llega un aviso al teléfono que abre
+  el clip listo para publicar.
+- Horas pico y zona horaria: variables `HORAS_PICO` (por defecto `12,19,22`) y `ZONA_HORARIA`
+  (por defecto `America/Santo_Domingo`).
+
+## 🧠 Detector inteligente y 📈 aprendizaje
+
+- **Detector inteligente** (con subtítulos instalados): además del volumen, escucha los mejores
+  candidatos y sube los que tienen palabras gancho (mentira, traición, respeto, jajaja…) o nombres de
+  participantes; baja los que son solo música o ruido. Lo usan los clips automáticos y el piloto.
+- **Aprende de tus vistas:** en cada clip toca **📈** y escribe sus vistas reales (ej. `12.5k`). Con 5 o
+  más, el porcentaje viral ajusta el peso de cada señal según lo que le funciona a tu página (con 15
+  confía del todo en tus datos). La tarjeta **📈 Lo que funciona en tu página** muestra los pesos.
+- **Más potencia:** los renders a la vez se ajustan solos a los núcleos del servidor (máx. 4); puedes
+  fijarlo con `RENDER_WORKERS`.
+
 ## 🤖 Piloto automático
 
 En **🔴 Directo → 🤖 Piloto automático** enciende el interruptor. Mientras se graba el directo, cada

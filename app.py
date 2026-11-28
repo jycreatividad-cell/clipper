@@ -58,7 +58,7 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # https detrás de Railway/Render
 social = Social(DATA)
 LOGO = DATA / "logo.png"
-RENDER_WORKERS = int(os.environ.get("RENDER_WORKERS", "2"))  # clips renderizándose a la vez
+RENDER_WORKERS = int(os.environ.get("RENDER_WORKERS") or max(1, min(4, (os.cpu_count() or 2) // 2)))  # renders a la vez
 RENDER_SEM = threading.Semaphore(RENDER_WORKERS)
 markers = []                       # momentos marcados con la tecla M
 markers_lock = threading.Lock()
@@ -780,6 +780,39 @@ def job_capture_anchor(jid, num, off, before, after, label):
     update_job(jid, result=capture_anchor(jid, num, off, before, after, label))
 
 
+SMART_WORDS = ("mentira", "traición", "traicion", "pelea", "respeto", "verdad", "confes", "nominad", "elimin",
+               "alofoke", "beso", "celos", "secreto", "jaja", "dique", "embuste", "falso", "cállate", "callate",
+               "eso no", "tú eres", "tu eres", "llorando", "perdón", "perdon", "te quiero", "amor")
+
+
+def smart_rerank(jid, found, src_args, d):
+    """Detector inteligente: escucha los mejores candidatos y sube los que tienen palabras gancho o nombres."""
+    if not found or not d.get("smart", True) or not _has_whisper():
+        return found
+    cands = sorted(found, key=lambda m: m["score"], reverse=True)[:8]
+    for i, m in enumerate(cands, 1):
+        update_job(jid, label=f"🧠 Escuchando momento {i}/{len(cands)}…", progress=30 + i * 8)
+        wav = TMP / f"sm_{jid}_{i}.wav"
+        try:
+            run_ffmpeg([*src_args, "-ss", f"{m['start']:.2f}", "-t", f"{max(3.0, m['end'] - m['start']):.2f}",
+                        "-vn", "-ac", "1", "-ar", "16000", str(wav)])
+            text = " ".join(w[2] for w in transcribe_words(wav))
+        except Exception:  # noqa: BLE001
+            continue
+        finally:
+            wav.unlink(missing_ok=True)
+        low = text.lower()
+        n_words = len(low.split())
+        boost = 4 * sum(1 for w in SMART_WORDS if w in low) + 3 * len(people_in_text(low))
+        boost += 2 if n_words >= 20 else (-3 if n_words < 4 else 0)
+        m["score"] = round(m["score"] + boost, 1)
+        m["text"], m["boost"] = text[:600], boost
+    best = max(m["score"] for m in found) or 1
+    for m in found:
+        m["stars"] = 3 if m["score"] >= best * 0.8 else 2 if m["score"] >= best * 0.5 else 1
+    return found
+
+
 def detect_moments(jid, d):
     """Busca las tomas importantes en el buffer del directo o en una captura. -> (lista, fuente)"""
     before, after = float(d.get("before", 20)), float(d.get("after", 8))
@@ -792,6 +825,7 @@ def detect_moments(jid, d):
                                      min_gap=max(12.0, before), min_score=float(d.get("min_score", 3.0)))
         for m in found:
             m.update(kind="capture", clip_id=d["clip_id"])
+        found = smart_rerank(jid, found, ["-i", str(CLIPS / meta["file"])], d)
         return found, meta.get("label")
     minutes = float(d.get("minutes", 10))
     work = TMP / ("mom_" + jid)
@@ -807,8 +841,8 @@ def detect_moments(jid, d):
     (work / "list.txt").write_text("".join(f"file '{(work / r[1].name).as_posix()}'\n" for r in rows),
                                    encoding="utf-8")
     update_job(jid, progress=20, label=f"Analizando los últimos {int(minutes)} min…")
-    lv = moments.loudness_curve(["-f", "concat", "-safe", "0", "-i", str(work / "list.txt")])
-    shutil.rmtree(work, ignore_errors=True)
+    src_args = ["-f", "concat", "-safe", "0", "-i", str(work / "list.txt")]
+    lv = moments.loudness_curve(src_args)
     found = moments.find_moments(lv, top=top, before=before, after=after, total=total - w0,
                                  min_gap=max(12.0, before), min_score=float(d.get("min_score", 3.0)))
     for m in found:
@@ -816,6 +850,10 @@ def detect_moments(jid, d):
         row = next((r for r in rows if r[2] <= absolute < r[2] + r[3]), rows[-1])
         m.update(kind="anchor", seg=row[0], off=round(absolute - row[2], 2),
                  ago=round(total - absolute), before=before, after=after)
+    try:
+        found = smart_rerank(jid, found, src_args, d)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     return found, f"últimos {int(minutes)} min"
 
 
@@ -847,6 +885,7 @@ def job_auto_clips(jid, d):
             item = {"kind": "anchor", "seg": m["seg"], "off": m["off"], "before": m["before"], "after": m["after"]}
         else:
             item = {"kind": "capture", "clip_id": m["clip_id"], "in": m["start"], "out": m["end"]}
+        item["text"] = m.get("text")
         item["label"] = label
         item["hook"] = (hooks_pool[(i - 1) % len(hooks_pool)] if hooks_pool else settings.get("hook", "")) if d.get("with_hook") else ""
         cid = new_job("render", label)
@@ -868,6 +907,8 @@ def job_batch_item(jid, item, settings):
         opts.update(clip_id=cid, **{"in": 0, "out": None})
     else:
         opts.update(clip_id=item["clip_id"], **{"in": item.get("in", 0), "out": item.get("out")})
+    if item.get("text"):
+        opts["_transcript_hint"] = item["text"]
     if item.get("hook") is not None:
         opts["hook"] = item["hook"]
     update_job(jid, label=f"{label}: renderizando…")
@@ -1313,7 +1354,7 @@ def job_render(jid, opts):
         update_job(jid, label=(opts.get("_label") or "Renderizando clip") + "…")
         run_ffmpeg(cmd, jid=jid, total=total, cwd=str(work))
     shutil.rmtree(work, ignore_errors=True)
-    meta_out = {"duration": dur, "format": fmt, "hook": hook, "transcript": opts.get("_transcript"),
+    meta_out = {"duration": dur, "format": fmt, "hook": hook, "transcript": opts.get("_transcript") or opts.get("_transcript_hint"),
                 "subs": bool(opts.get("subs")), "cover": bool(cover_file),
                 "watermark": bool((opts.get("watermark") or "").strip() or opts.get("logo")),
                 "moment_score": opts.get("_moment_score")}
@@ -1328,8 +1369,8 @@ def job_render(jid, opts):
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
                     "cover": cover_file.name if cover_file else None, "cat": opts.get("hook_cat"),
                     "transcript": opts.get("_transcript"),
-                    "people": sorted(set((opts.get("people") or []) + people_in_text(opts.get("_transcript")))),
-                    "label": hook.replace("*", "")[:60] or src_meta.get("label") or f"Clip {fmt} {dur:.0f}s"})
+                    "people": sorted(set((opts.get("people") or []) + people_in_text(opts.get("_transcript") or opts.get("_transcript_hint")))),
+                    "label": hook.split("|")[0].replace("*", "").strip()[:60] or src_meta.get("label") or f"Clip {fmt} {dur:.0f}s"})
     update_job(jid, result=rid)
     return rid
 
@@ -1341,6 +1382,57 @@ VIRAL_WORDS = ("mentira", "traición", "traicion", "pelea", "lío", "lio", "verd
 
 def _clamp(x):
     return int(max(0, min(100, round(x))))
+
+
+BASE_WEIGHTS = {"momento": .30, "arranque": .20, "duracion": .15, "hook": .15, "palabras": .10, "formato": .10}
+LEARN = DATA / "aprendizaje.json"
+
+
+def current_weights():
+    try:
+        w = json.loads(LEARN.read_text(encoding="utf-8")).get("weights")
+        if w and set(w) == set(BASE_WEIGHTS):
+            return w
+    except Exception:  # noqa: BLE001
+        pass
+    return dict(BASE_WEIGHTS)
+
+
+def weighted_score(parts, weights=None):
+    w = weights or current_weights()
+    return _clamp(sum(parts.get(k, 0) * v for k, v in w.items()))
+
+
+def learn_from_views():
+    """Ajusta los pesos con las vistas reales: más peso a lo que se relaciona con más vistas en tu página."""
+    import math
+    rows = []
+    for mp in CLIPS.glob("clip_*.json"):
+        try:
+            d = json.loads(mp.read_text(encoding="utf-8"))
+            v = (d.get("stats") or {}).get("views")
+            if v is not None and (d.get("viral") or {}).get("parts"):
+                rows.append((d["viral"]["parts"], math.log10(float(v) + 1)))
+        except Exception:  # noqa: BLE001
+            pass
+    out = {"n": len(rows), "weights": dict(BASE_WEIGHTS), "corr": {}}
+    if len(rows) >= 5:
+        ys = [y for _, y in rows]
+        my = sum(ys) / len(ys)
+        sy = math.sqrt(sum((y - my) ** 2 for y in ys)) or 1
+        raw = {}
+        for k, base in BASE_WEIGHTS.items():
+            xs = [p.get(k, 0) for p, _ in rows]
+            mx = sum(xs) / len(xs)
+            sx = math.sqrt(sum((x - mx) ** 2 for x in xs))
+            corr = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / (sx * sy) if sx else 0.0
+            out["corr"][k] = round(corr, 2)
+            raw[k] = base * max(0.2, 1 + corr)
+        tot = sum(raw.values())
+        trust = min(1.0, len(rows) / 15)  # con pocos clips se mezcla con los pesos normales
+        out["weights"] = {k: round(BASE_WEIGHTS[k] * (1 - trust) + raw[k] / tot * trust, 3) for k in BASE_WEIGHTS}
+    LEARN.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    return out
 
 
 def viral_score(path, m):
@@ -1372,7 +1464,7 @@ def viral_score(path, m):
     fmt = _clamp((40 if m.get("format") == "vertical" else 15) + (30 if m.get("subs") else 0) +
                  (15 if m.get("cover") else 0) + (15 if m.get("watermark") else 0))
     parts = {"momento": intensity, "arranque": start, "duracion": duration, "hook": hook, "palabras": words, "formato": fmt}
-    score = _clamp(intensity * .30 + start * .20 + duration * .15 + hook * .15 + words * .10 + fmt * .10)
+    score = weighted_score(parts)
     tips = []
     if intensity < 45:
         tips.append("Momento con poca energía: prueba otra toma más fuerte.")
@@ -1448,6 +1540,14 @@ def hook_kwargs(o, style, W, H, prefix="hook_"):
     """parámetros de tamaño y de plantilla, desde el JSON del render o la URL de la vista previa."""
     size = float(o.get(prefix + "size", o.get("size", 100)) or 100) / 100
     kw = {"scale": size * (1 if (H > W or style.startswith("t:")) else 0.75), "height": H}
+    if style.startswith("x:"):  # formas de texto: etiqueta/nombre y @usuario de la publicación
+        v = o.get("tpl_badge")
+        if v is not None and v != "__default__":
+            kw["badge"] = str(v)
+        if o.get("tpl_accent") and re.fullmatch(r"#[0-9A-Fa-f]{6}", str(o.get("tpl_accent"))):
+            kw["accent"] = o["tpl_accent"]
+        wm = (o.get("watermark") or "").strip()
+        kw["handle"] = wm if wm.startswith("@") else None
     if style.startswith("t:"):
         for k in ("accent", "badge", "icon"):
             v = o.get("tpl_" + k)
@@ -1526,7 +1626,9 @@ def preview_jpeg(params):
         frame = preview_background(W, H).copy()
     style = a.get("style", hooks.DEFAULT_STYLE)
     text = a.get("text", "").strip()
-    if not text and not style.startswith("t:"):
+    if not text and style.startswith("x:"):  # ejemplo de cada forma de texto
+        text = {"x:encuesta": "¿QUIÉN TIENE LA *RAZÓN*? | ELLA | ÉL"}.get(style, "SE ARMÓ EL *LÍO* EN LA CASA 😱")
+    elif not text and not style.startswith("t:"):
         text = "ESCRIBE TU *HOOK* AQUÍ 🔥"   # las plantillas usan su propio texto de ejemplo
     img = hooks.render_hook(text, style, W, **hook_kwargs(a, style, W, H, prefix=""))
     if img:
@@ -1594,7 +1696,8 @@ def custom_sound(name):
 @app.get("/api/hook-styles")
 def api_hook_styles():
     import templates
-    return jsonify(simple=hooks.style_list(), templates=templates.template_list())
+    import textstyles
+    return jsonify(simple=hooks.style_list(), templates=templates.template_list(), forms=textstyles.form_list())
 
 
 # --------------------------------------------------------------------------- API
@@ -1890,7 +1993,7 @@ def pilot_cycle(cfg):
             label = f"🤖 Piloto · hace {fmt_t(m['ago'])}"
             hook = (hooks_pool[(pilot_state["made"] + i) % len(hooks_pool)] if hooks_pool else settings.get("hook", "")) if cfg["with_hook"] else ""
             item = {"kind": "anchor", "seg": m["seg"], "off": m["off"], "before": m["before"], "after": m["after"],
-                    "label": label, "hook": hook}
+                    "label": label, "hook": hook, "text": m.get("text")}
             cid = new_job("render", label)
             run_job(cid, job_batch_item, item, dict(settings, _label=label, _moment_score=m["score"],
                                                     draft=bool(cfg["drafts"]), _auto=True, people=[]))
@@ -2007,6 +2110,200 @@ def folder_mb(path):
         except OSError:
             pass
     return round(total / 1e6)
+
+
+# ================= cola de publicación en horas pico
+QUEUE = DATA / "cola.json"
+_queue_lock = threading.Lock()
+PEAK_HOURS = [int(h) for h in os.environ.get("HORAS_PICO", "12,19,22").split(",") if h.strip().isdigit()]
+
+
+def page_tz():
+    from zoneinfo import ZoneInfo
+    try:
+        return ZoneInfo(os.environ.get("ZONA_HORARIA", "America/Santo_Domingo"))
+    except Exception:  # noqa: BLE001
+        from datetime import timezone, timedelta
+        return timezone(timedelta(hours=-4))
+
+
+def next_peaks(n=6, after=None):
+    from datetime import datetime, timedelta
+    tz = page_tz()
+    now = datetime.fromtimestamp(after or time.time(), tz)
+    out, day = [], now.replace(minute=0, second=0, microsecond=0)
+    for dd in range(0, 8):
+        for h in sorted(PEAK_HOURS):
+            t = (day + timedelta(days=dd)).replace(hour=h)
+            if t.timestamp() > now.timestamp() + 120:
+                out.append(t)
+            if len(out) >= n:
+                return out
+    return out
+
+
+def peak_label(dt):
+    from datetime import datetime
+    today = datetime.now(dt.tzinfo).date()
+    day = "hoy" if dt.date() == today else "mañana" if (dt.date() - today).days == 1 else \
+        ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"][dt.weekday()] + f" {dt.day}"
+    h = dt.hour % 12 or 12
+    return f"{day} {h}:{dt.minute:02d} {'pm' if dt.hour >= 12 else 'am'}"
+
+
+def queue_load():
+    try:
+        return json.loads(QUEUE.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def queue_save(items):
+    QUEUE.write_text(json.dumps(items[-300:], ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def queue_add(clip_id, when, targets, caption, tiktok_mode="inbox"):
+    meta = json.loads(meta_path(clip_id).read_text(encoding="utf-8"))
+    st = social.status()
+    ok_targets = [t for t in targets if st.get(t)]
+    item = {"id": uuid.uuid4().hex[:8], "clip_id": clip_id, "when": float(when), "targets": ok_targets,
+            "caption": caption, "tiktok_mode": tiktok_mode, "status": "pendiente", "msg": "",
+            "label": meta.get("label") or clip_id, "mode": "auto" if ok_targets else "aviso",
+            "base": public_base()}
+    with _queue_lock:
+        items = queue_load()
+        items.append(item)
+        queue_save(items)
+    return item
+
+
+def queue_loop():
+    while True:
+        time.sleep(30)
+        try:
+            with _queue_lock:
+                items = queue_load()
+                due = [i for i in items if i["status"] == "pendiente" and i["when"] <= time.time()]
+                for i in due:
+                    i["status"] = "publicando"
+                if due:
+                    queue_save(items)
+            for it in due:
+                msgs, failed = [], False
+                if not meta_path(it["clip_id"]).exists():
+                    it["status"], it["msg"] = "error", "El clip ya no existe (se borró)."
+                elif it["mode"] == "aviso":
+                    notify("⏰ Hora de publicar", f"{it['label'][:60]} · toca para abrirlo y publicar",
+                           f"/?pub={it['clip_id']}#clips")
+                    it["status"], it["msg"] = "avisado", "Te avisé en el teléfono."
+                else:
+                    for t in it["targets"]:
+                        jid = new_job("publicar", f"📅 Publicando en {t}…")
+                        try:
+                            job_publish(jid, t, it["clip_id"], it["caption"], it.get("tiktok_mode", "inbox"), it.get("base"))
+                            update_job(jid, status="listo", progress=100)
+                            msgs.append(f"{t} ✓")
+                        except Exception as e:  # noqa: BLE001
+                            failed = True
+                            update_job(jid, status="error", error=clean_error(e)[:300])
+                            msgs.append(f"{t}: {clean_error(e)[:120]}")
+                    it["status"] = "error" if failed else "publicado"
+                    it["msg"] = " · ".join(msgs)
+                    notify("✅ Publicado" if not failed else "⚠️ Problema al publicar", f"{it['label'][:50]} · {it['msg'][:80]}", "/#clips")
+                with _queue_lock:
+                    items = queue_load()
+                    for x in items:
+                        if x["id"] == it["id"]:
+                            x.update(status=it["status"], msg=it["msg"])
+                    queue_save(items)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+threading.Thread(target=queue_loop, daemon=True).start()
+
+
+@app.get("/api/queue")
+def api_queue():
+    items = sorted(queue_load(), key=lambda i: i["when"])
+    for i in items:
+        from datetime import datetime
+        i["when_label"] = peak_label(datetime.fromtimestamp(i["when"], page_tz()))
+    return jsonify(items=items, peaks=[{"t": p.timestamp(), "label": peak_label(p)} for p in next_peaks(6)])
+
+
+@app.post("/api/queue")
+def api_queue_add():
+    d = request.json or {}
+    cid = d.get("clip_id", "")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", cid) or not meta_path(cid).exists():
+        return jsonify(error="Clip no encontrado"), 404
+    when = d.get("when")
+    if not when:
+        taken = {round(i["when"]) for i in queue_load() if i["status"] == "pendiente"}
+        when = next((p.timestamp() for p in next_peaks(12) if round(p.timestamp()) not in taken), None)
+    if not when or float(when) < time.time() - 60:
+        return jsonify(error="Elige una hora en el futuro"), 400
+    item = queue_add(cid, when, d.get("targets") or [], d.get("caption", ""), d.get("tiktok_mode", "inbox"))
+    return jsonify(item)
+
+
+@app.delete("/api/queue/<qid>")
+def api_queue_delete(qid):
+    with _queue_lock:
+        queue_save([i for i in queue_load() if i["id"] != qid])
+    return jsonify(ok=True)
+
+
+@app.post("/api/queue/spread")
+def api_queue_spread():
+    """Reparte los mejores clips (por % viral) en las próximas horas pico libres."""
+    d = request.json or {}
+    n = max(1, min(9, int(d.get("count", 3))))
+    queued = {i["clip_id"] for i in queue_load() if i["status"] in ("pendiente", "publicado", "avisado")}
+    finals = []
+    for mp in CLIPS.glob("clip_*.json"):
+        try:
+            m = json.loads(mp.read_text(encoding="utf-8"))
+            if m.get("type") == "final" and m["id"] not in queued and m.get("viral"):
+                finals.append(m)
+        except Exception:  # noqa: BLE001
+            pass
+    w = current_weights()
+    finals.sort(key=lambda m: weighted_score(m["viral"]["parts"], w), reverse=True)
+    finals = [m for m in finals if weighted_score(m["viral"]["parts"], w) >= int(d.get("min_score", 45))][:n]
+    if not finals:
+        return jsonify(error="No hay clips terminados sin programar (con 45 % o más)."), 400
+    taken = {round(i["when"]) for i in queue_load() if i["status"] == "pendiente"}
+    slots = [p for p in next_peaks(20) if round(p.timestamp()) not in taken][:len(finals)]
+    out = []
+    for m, slot in zip(finals, slots):
+        out.append(queue_add(m["id"], slot.timestamp(), d.get("targets") or [], d.get("captions", {}).get(m["id"], ""),
+                             d.get("tiktok_mode", "inbox")))
+    return jsonify(items=out)
+
+
+@app.post("/api/stats/<cid>")
+def api_stats(cid):
+    if not re.fullmatch(r"[A-Za-z0-9_]+", cid) or not meta_path(cid).exists():
+        return jsonify(error="Clip no encontrado"), 404
+    d = request.json or {}
+    try:
+        views = int(float(str(d.get("views", "")).lower().replace("k", "e3").replace("m", "e6").replace(",", "")))
+    except ValueError:
+        return jsonify(error="Escribe un número de vistas, por ejemplo 12500 o 12.5k"), 400
+    meta = json.loads(meta_path(cid).read_text(encoding="utf-8"))
+    meta["stats"] = {"views": max(0, views), "at": time.time()}
+    save_meta(cid, meta)
+    return jsonify(stats=meta["stats"], learn=learn_from_views())
+
+
+@app.get("/api/learn")
+def api_learn():
+    try:
+        return jsonify(json.loads(LEARN.read_text(encoding="utf-8")))
+    except Exception:  # noqa: BLE001
+        return jsonify(n=0, weights=BASE_WEIGHTS, corr={})
 
 
 @app.post("/api/auto-clips")
@@ -2341,6 +2638,12 @@ def api_status():
         except Exception:  # noqa: BLE001
             pass
     clips.sort(key=lambda c: c["created"], reverse=True)
+    w = current_weights()
+    for c in clips:
+        v = c.get("viral")
+        if v and v.get("parts"):
+            v["score"] = weighted_score(v["parts"], w)
+            v["level"] = "alto" if v["score"] >= 70 else "medio" if v["score"] >= 45 else "bajo"
     with jobs_lock:
         js = sorted(jobs.values(), key=lambda j: j["created"], reverse=True)[:30]
     return jsonify(
@@ -2352,6 +2655,7 @@ def api_status():
         markers=markers[:30], logo=LOGO.exists(), social=social.status(),
         public_base=public_base(), render_workers=RENDER_WORKERS, ai=ai_available(),
         pilot={"cfg": pilot_cfg(), "state": pilot_state}, push=push_available(), push_count=len(push_subs()),
+        queue_pending=sum(1 for i in queue_load() if i["status"] == "pendiente"), smart=_has_whisper(),
         disk={"clips_mb": folder_mb(CLIPS), "buffer_mb": folder_mb(BUF),
               "free_gb": round(shutil.disk_usage(DATA).free / 1e9, 1)},
         js_runtime=bool(shutil.which("deno") or any(shutil.which(r) for r in ("node", "bun", "quickjs"))))
