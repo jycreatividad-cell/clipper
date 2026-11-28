@@ -178,10 +178,24 @@ def manifest():
 @app.get("/sw.js")
 def service_worker():
     from flask import Response
-    js = """// Clipper: permite instalar la app; todo se pide siempre al servidor (sin caché vieja)
+    js = """// Clipper: permite instalar la app y recibir avisos; todo se pide siempre al servidor
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', () => {});
+self.addEventListener('push', e => {
+  let d = {title: 'Clipper', body: 'Hay novedades', url: '/#clips'};
+  try { d = Object.assign(d, e.data.json()); } catch (x) {}
+  e.waitUntil(self.registration.showNotification(d.title, {body: d.body, icon: '/static/icons/icon-192.png',
+    badge: '/static/icons/icon-192.png', data: {url: d.url}, tag: 'clipper', renotify: true}));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(clients.matchAll({type: 'window', includeUncontrolled: true}).then(list => {
+    for (const c of list) { if ('focus' in c) { c.navigate(url).catch(() => {}); return c.focus(); } }
+    return clients.openWindow(url);
+  }));
+});
 """
     return Response(js, mimetype="application/javascript", headers={"Cache-Control": "no-cache"})
 
@@ -661,9 +675,46 @@ def link_or_copy(src, dst):
 rec = Recorder()
 
 
+def clip_files(cid):
+    return [f for f in CLIPS.glob(f"{cid}*") if f.name.split(".")[0] in (cid, f"{cid}_portada")]
+
+
+def auto_clean():
+    """Borra capturas y borradores viejos, y clips terminados antiguos que no estén guardados con ⭐."""
+    cfg = pilot_cfg()
+    if not cfg.get("clean", True):
+        return 0
+    now = time.time()
+    metas = []
+    for mp in CLIPS.glob("*.json"):
+        try:
+            metas.append(json.loads(mp.read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001
+            pass
+    in_use = {(m.get("opts") or {}).get("clip_id") for m in metas if m.get("type") == "borrador"}
+    removed = 0
+    for m in metas:
+        age = now - float(m.get("created") or now)
+        t = m.get("type")
+        old = ((t in ("captura", "borrador") and age > cfg.get("caps_hours", 24) * 3600 and m["id"] not in in_use) or
+               (t in ("final", "portada") and age > cfg.get("clips_days", 7) * 86400 and not m.get("keep")))
+        if old:
+            for f in clip_files(m["id"]):
+                f.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def janitor():
+    last_clean = 0
     while True:
         rec.cleanup()
+        if time.time() - last_clean > 600:
+            last_clean = time.time()
+            try:
+                auto_clean()
+            except Exception:  # noqa: BLE001
+                pass
         # borrar temporales viejos (>2h)
         for d in TMP.iterdir():
             try:
@@ -803,6 +854,7 @@ def job_auto_clips(jid, d):
         ids.append(cid)
     extra = f" (solo encontré {len(ids)} momentos distintos)" if len(ids) < n else ""
     update_job(jid, label=f"✅ {len(ids)} clip{'s' if len(ids) != 1 else ''} en camino · {source}{extra}", result={"jobs": ids})
+    wait_and_notify(ids, "clips automáticos listos")
 
 
 def job_batch_item(jid, item, settings):
@@ -1053,6 +1105,9 @@ def job_render(jid, opts):
         raise RuntimeError("La salida debe ser mayor que la entrada.")
     fmt = opts.get("format", "vertical")
     W, H = FORMATS.get(fmt, FORMATS["vertical"])
+    draft = bool(opts.get("draft"))
+    if draft:  # borrador: mitad de resolución, para revisar rápido antes del final
+        W, H = W // 2, H // 2
     mode = opts.get("mode", "blur")  # blur = fondo desenfocado, fill = recorte a pantalla completa
     pos = min(1.0, max(0.0, float(opts.get("pos", 50)) / 100))
     zoom = min(2.0, max(1.0, float(opts.get("zoom", 100)) / 100))
@@ -1108,7 +1163,7 @@ def job_render(jid, opts):
         last = f"v{n}"
 
     # ---- subtítulos automáticos (van debajo del hook y de la marca)
-    if opts.get("subs"):
+    if opts.get("subs") and not draft:
         update_job(jid, label="Transcribiendo audio…", progress=3)
         wav = work / "audio.wav"
         run_ffmpeg(["-ss", f"{t_in:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
@@ -1224,7 +1279,7 @@ def job_render(jid, opts):
     # ---- portada como primer cuadro (0.35 s antes del clip; TikTok usa el primer cuadro de portada)
     cover_file = None
     total = dur
-    if opts.get("cover_first"):
+    if opts.get("cover_first") and not draft:
         ct = float(opts.get("cover_t") if opts.get("cover_t") not in (None, "") else t_in + 0.5)
         cover = make_cover(src, ct, opts, W, H)
         cover.save(work / "cover.png")
@@ -1249,7 +1304,8 @@ def job_render(jid, opts):
     filt = ";".join(chain)
     cmd = ["-ss", f"{t_in:.3f}", "-t", f"{dur:.3f}", "-i", str(src), *inputs,
            "-filter_complex", filt, "-map", f"[{last}]", "-map", audio_map,
-           "-c:v", "libx264", "-preset", "superfast" if fast else "veryfast", "-crf", "22" if fast else "19",
+           "-c:v", "libx264", "-preset", "ultrafast" if draft else "superfast" if fast else "veryfast",
+           "-crf", "30" if draft else "22" if fast else "19",
            "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "160k", "-t", f"{total:.3f}",
            "-movflags", "+faststart", str(out)]
     update_job(jid, label=(opts.get("_label") or "Renderizando clip") + " · en cola…")
@@ -1265,7 +1321,10 @@ def job_render(jid, opts):
         viral = viral_score(out, meta_out)
     except Exception:  # noqa: BLE001
         viral = None
-    save_meta(rid, {"id": rid, "type": "final", "file": out.name, "created": time.time(), "viral": viral,
+    keep_opts = {k: v for k, v in opts.items() if not k.startswith("_") or k in ("_part", "_moment_score", "_label")}
+    keep_opts.pop("draft", None)
+    save_meta(rid, {"id": rid, "type": "borrador" if draft else "final", "file": out.name, "created": time.time(),
+                    "viral": viral, "opts": keep_opts if draft else None, "auto": bool(opts.get("_auto")),
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
                     "cover": cover_file.name if cover_file else None, "cat": opts.get("hook_cat"),
                     "transcript": opts.get("_transcript"),
@@ -1673,6 +1732,283 @@ def api_style_save():
     return jsonify(my_style())
 
 
+# ================= avisos en el iPhone (Web Push; iOS 16.4+ con la app instalada)
+PUSH_SUBS = DATA / "push.json"
+VAPID_PEM = DATA / "vapid_private.pem"
+_push_lock = threading.Lock()
+
+
+def push_available():
+    try:
+        import pywebpush  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def vapid():
+    from py_vapid import Vapid02
+    if not VAPID_PEM.exists():
+        v = Vapid02()
+        v.generate_keys()
+        v.save_key(str(VAPID_PEM))
+        try:
+            os.chmod(VAPID_PEM, 0o600)
+        except OSError:
+            pass
+    return Vapid02.from_file(str(VAPID_PEM))
+
+
+def vapid_public():
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    raw = vapid().public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def push_subs():
+    try:
+        return json.loads(PUSH_SUBS.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def notify(title, body, url="/#clips"):
+    """Manda un aviso a todos los teléfonos suscritos (en segundo plano)."""
+    if not push_available():
+        return
+
+    def send():
+        from pywebpush import WebPushException, webpush
+        v = vapid()
+        sub_claim = os.environ.get("PUBLIC_URL", "").strip() or "mailto:avisos@clipper.app"
+        payload = json.dumps({"title": title, "body": body, "url": url}, ensure_ascii=False)
+        with _push_lock:
+            subs = push_subs()
+            keep = []
+            for sub in subs:
+                try:
+                    webpush(sub, payload, vapid_private_key=v, vapid_claims={"sub": sub_claim}, ttl=3600, timeout=15)
+                    keep.append(sub)
+                except WebPushException as e:
+                    code = getattr(e.response, "status_code", None)
+                    if code not in (404, 410):  # 404/410 = el teléfono ya no acepta avisos
+                        keep.append(sub)
+                except Exception:  # noqa: BLE001
+                    keep.append(sub)
+            if len(keep) != len(subs):
+                PUSH_SUBS.write_text(json.dumps(keep), encoding="utf-8")
+    threading.Thread(target=send, daemon=True).start()
+
+
+@app.get("/api/push/key")
+def api_push_key():
+    if not push_available():
+        return jsonify(error="Los avisos no están instalados en el servidor (pywebpush)."), 400
+    return jsonify(key=vapid_public())
+
+
+@app.post("/api/push/subscribe")
+def api_push_subscribe():
+    sub = (request.json or {}).get("subscription") or {}
+    if not str(sub.get("endpoint", "")).startswith("https://") or not (sub.get("keys") or {}).get("p256dh"):
+        return jsonify(error="Suscripción inválida"), 400
+    with _push_lock:
+        subs = [x for x in push_subs() if x.get("endpoint") != sub["endpoint"]] + [sub]
+        PUSH_SUBS.write_text(json.dumps(subs[-20:]), encoding="utf-8")
+    return jsonify(ok=True, count=len(subs))
+
+
+@app.post("/api/push/test")
+def api_push_test():
+    if not push_subs():
+        return jsonify(error="Ningún teléfono tiene los avisos activados todavía."), 400
+    notify("✂️ Clipper", "¡Los avisos funcionan! Te avisaré cuando haya clips nuevos.", "/#clips")
+    return jsonify(ok=True)
+
+
+# ================= piloto automático: vigila el directo y crea clips solo
+PILOT = DATA / "piloto.json"
+PILOT_DEFAULT = {"enabled": False, "interval": 10, "count": 3, "with_hook": True, "drafts": True,
+                 "min_stars": 2, "before": 20, "after": 6, "hooks": [], "notify": True,
+                 "clean": True, "caps_hours": 24, "clips_days": 7}
+pilot_state = {"last_run": None, "next_run": None, "made": 0, "msg": "", "busy": False}
+pilot_done = []  # posiciones aproximadas del directo ya convertidas en clip (para no repetir)
+
+
+def pilot_cfg():
+    try:
+        return {**PILOT_DEFAULT, **json.loads(PILOT.read_text(encoding="utf-8"))}
+    except Exception:  # noqa: BLE001
+        return dict(PILOT_DEFAULT)
+
+
+def _gpos(m):
+    return int(m["seg"]) * SEG_SECONDS + float(m["off"])
+
+
+def wait_and_notify(job_ids, what):
+    def run():
+        while True:
+            with jobs_lock:
+                js = [jobs.get(j) for j in job_ids]
+            if all(j and j["status"] != "trabajando" for j in js):
+                break
+            time.sleep(3)
+        ok = [j for j in js if j["status"] == "listo"]
+        if not ok:
+            return
+        scores = []
+        for j in ok:
+            try:
+                scores.append(json.loads(meta_path(j["result"]).read_text(encoding="utf-8"))["viral"]["score"])
+            except Exception:  # noqa: BLE001
+                pass
+        best = f" · el mejor 🔥 {max(scores)}%" if scores else ""
+        notify(f"🎬 {len(ok)} {what}", f"Listos para revisar en Clipper{best}", "/#clips")
+    threading.Thread(target=run, daemon=True).start()
+
+
+def pilot_cycle(cfg):
+    pilot_state["busy"] = True
+    jid = new_job("piloto", "🤖 Piloto automático: buscando momentos nuevos…")
+    try:
+        found, _ = detect_moments(jid, {"minutes": cfg["interval"] + 1, "before": cfg["before"],
+                                        "after": cfg["after"], "top": 12})
+        fresh = [m for m in found if m["stars"] >= int(cfg["min_stars"]) and
+                 all(abs(_gpos(m) - g) > cfg["before"] + cfg["after"] for g in pilot_done)]
+        fresh = sorted(fresh, key=lambda m: m["score"], reverse=True)[:int(cfg["count"])]
+        if not fresh:
+            pilot_state["msg"] = "Sin momentos nuevos fuertes en este ciclo."
+            update_job(jid, status="listo", progress=100, label="🤖 Piloto: sin momentos nuevos fuertes")
+            return
+        settings = my_style()
+        hooks_pool = [h for h in cfg.get("hooks") or [] if h.strip()]
+        ids = []
+        for i, m in enumerate(fresh):
+            pilot_done.append(_gpos(m))
+            label = f"🤖 Piloto · hace {fmt_t(m['ago'])}"
+            hook = (hooks_pool[(pilot_state["made"] + i) % len(hooks_pool)] if hooks_pool else settings.get("hook", "")) if cfg["with_hook"] else ""
+            item = {"kind": "anchor", "seg": m["seg"], "off": m["off"], "before": m["before"], "after": m["after"],
+                    "label": label, "hook": hook}
+            cid = new_job("render", label)
+            run_job(cid, job_batch_item, item, dict(settings, _label=label, _moment_score=m["score"],
+                                                    draft=bool(cfg["drafts"]), _auto=True, people=[]))
+            ids.append(cid)
+        del pilot_done[:-300]
+        pilot_state["made"] += len(ids)
+        pilot_state["msg"] = f"{len(ids)} clip{'s' if len(ids) > 1 else ''} en camino."
+        update_job(jid, status="listo", progress=100, label=f"🤖 Piloto: {len(ids)} momentos nuevos → creando clips")
+        if cfg.get("notify"):
+            wait_and_notify(ids, "borradores nuevos del piloto" if cfg["drafts"] else "clips nuevos del piloto")
+    except Exception as e:  # noqa: BLE001
+        pilot_state["msg"] = "Error: " + clean_error(e)[:200]
+        update_job(jid, status="error", error=clean_error(e)[:300])
+    finally:
+        pilot_state["busy"] = False
+
+
+def pilot_loop():
+    while True:
+        time.sleep(10)
+        try:
+            cfg = pilot_cfg()
+            if not cfg["enabled"] or not rec.running:
+                pilot_state["next_run"] = None
+                continue
+            now = time.time()
+            if pilot_state["next_run"] is None:  # primer ciclo cuando haya buffer suficiente
+                pilot_state["next_run"] = now + min(cfg["interval"] * 60, 120)
+            if now >= pilot_state["next_run"] and not pilot_state["busy"]:
+                pilot_state["last_run"] = now
+                pilot_state["next_run"] = now + cfg["interval"] * 60
+                threading.Thread(target=pilot_cycle, args=(cfg,), daemon=True).start()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+threading.Thread(target=pilot_loop, daemon=True).start()
+
+
+@app.get("/api/pilot")
+def api_pilot():
+    return jsonify(cfg=pilot_cfg(), state=pilot_state)
+
+
+@app.post("/api/pilot")
+def api_pilot_save():
+    d = request.json or {}
+    cfg = pilot_cfg()
+    for k, v in d.items():
+        if k in PILOT_DEFAULT:
+            cfg[k] = v
+    cfg["interval"] = max(3, min(60, int(cfg["interval"])))
+    cfg["count"] = max(1, min(5, int(cfg["count"])))
+    cfg["caps_hours"] = max(2, min(240, int(cfg["caps_hours"])))
+    cfg["clips_days"] = max(1, min(60, int(cfg["clips_days"])))
+    PILOT.write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+    if "enabled" in d or "interval" in d:
+        pilot_state["next_run"] = None
+    return jsonify(cfg=cfg, state=pilot_state)
+
+
+@app.post("/api/pilot/run")
+def api_pilot_run():
+    if not rec.running:
+        return jsonify(error="Inicia la grabación del directo primero."), 400
+    if pilot_state["busy"]:
+        return jsonify(error="El piloto ya está trabajando."), 400
+    pilot_state["last_run"] = time.time()
+    threading.Thread(target=pilot_cycle, args=(pilot_cfg(),), daemon=True).start()
+    return jsonify(ok=True)
+
+
+@app.post("/api/approve/<cid>")
+def api_approve(cid):
+    """Convierte un borrador en el clip final (calidad completa, subtítulos y portada)."""
+    if not re.fullmatch(r"[A-Za-z0-9_]+", cid) or not meta_path(cid).exists():
+        return jsonify(error="Borrador no encontrado"), 404
+    meta = json.loads(meta_path(cid).read_text(encoding="utf-8"))
+    if meta.get("type") != "borrador" or not meta.get("opts"):
+        return jsonify(error="Ese clip no es un borrador"), 400
+    opts = dict(meta["opts"], draft=False, _label="✅ Final de " + (meta.get("label") or "borrador"))
+    if not meta_path(opts.get("clip_id", "")).exists():
+        return jsonify(error="La captura de ese borrador ya se borró. Haz el clip de nuevo."), 400
+    jid = new_job("render", opts["_label"])
+
+    def job(j, o, draft_id):
+        job_render(j, o)
+        for f in clip_files(draft_id):
+            f.unlink(missing_ok=True)
+    run_job(jid, job, opts, cid)
+    return jsonify(job=jid)
+
+
+@app.post("/api/keep/<cid>")
+def api_keep(cid):
+    if not re.fullmatch(r"[A-Za-z0-9_]+", cid) or not meta_path(cid).exists():
+        return jsonify(error="Clip no encontrado"), 404
+    meta = json.loads(meta_path(cid).read_text(encoding="utf-8"))
+    meta["keep"] = not meta.get("keep")
+    save_meta(cid, meta)
+    return jsonify(keep=meta["keep"])
+
+
+@app.post("/api/clean")
+def api_clean():
+    return jsonify(removed=auto_clean())
+
+
+def folder_mb(path):
+    total = 0
+    for f in path.glob("*"):
+        try:
+            total += f.stat().st_size
+        except OSError:
+            pass
+    return round(total / 1e6)
+
+
 @app.post("/api/auto-clips")
 def api_auto_clips():
     d = request.json or {}
@@ -2015,6 +2351,9 @@ def api_status():
         cookies=COOKIES.exists(),
         markers=markers[:30], logo=LOGO.exists(), social=social.status(),
         public_base=public_base(), render_workers=RENDER_WORKERS, ai=ai_available(),
+        pilot={"cfg": pilot_cfg(), "state": pilot_state}, push=push_available(), push_count=len(push_subs()),
+        disk={"clips_mb": folder_mb(CLIPS), "buffer_mb": folder_mb(BUF),
+              "free_gb": round(shutil.disk_usage(DATA).free / 1e9, 1)},
         js_runtime=bool(shutil.which("deno") or any(shutil.which(r) for r in ("node", "bun", "quickjs"))))
 
 

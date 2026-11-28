@@ -10,3 +10,6 @@ logo.png
 sounds/
 participantes.json
 estilo.json
+push.json
+piloto.json
+vapid_private.pem

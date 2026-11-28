@@ -3,3 +3,4 @@ yt-dlp[default]>=2025.11.12
 pillow>=10.0
 requests>=2.31
 anthropic>=1.0
+pywebpush>=2.0

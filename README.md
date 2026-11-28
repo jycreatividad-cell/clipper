@@ -107,6 +107,25 @@ En 🎬 Clips puedes ordenar por **🔥 Más virales**.
 - **🏷️ Texto de contexto**: etiqueta pequeña y semitransparente arriba o debajo del video
   (empieza con ● para el punto rojo de "en vivo"). Opción para numerar los lotes: PARTE 1/5…
 
+## 🤖 Piloto automático
+
+En **🔴 Directo → 🤖 Piloto automático** enciende el interruptor. Mientras se graba el directo, cada
+3/5/10/15/30 min busca momentos nuevos (sin repetir los ya hechos), crea 1-5 clips con tu **Mi estilo**
+y un hook distinto, y les pone su porcentaje viral. Corre en el servidor: sigue trabajando aunque
+cierres la app. **▶ Buscar ahora** lanza un ciclo al momento.
+
+- **Borradores rápidos primero:** salen a media resolución en segundos, sin subtítulos ni portada.
+  En 🎬 Clips toca **✅ Aprobar final** y se hace la versión completa (el borrador se borra solo).
+- **🔔 Avisos en el iPhone:** instala la app en la pantalla de inicio (iOS 16.4 o más), ábrela desde
+  el icono y toca **🔔 Activar avisos aquí**. Te avisa cuando el piloto o los clips automáticos terminan;
+  al tocar el aviso se abre la pestaña Clips.
+
+## 🧹 Limpieza automática
+
+En **🚀 Cuentas → 🧹 Limpieza automática**: borra capturas y borradores después de 12 h / 1 / 2 días y
+clips terminados después de 2 / 7 / 30 días, para que el servidor no se llene. Los clips con ⭐ nunca
+se borran. Muestra cuánto espacio usas.
+
 ## ✨ Clips automáticos de los mejores momentos
 
 En **🔴 Directo → Capturar** hay dos botones:
