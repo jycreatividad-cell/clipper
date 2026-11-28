@@ -176,7 +176,9 @@
   .btnfile{position:relative;overflow:hidden;background:#26262e;border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-weight:600;font-size:14px;cursor:pointer}
   .btnfile input{position:absolute;inset:0;opacity:0;cursor:pointer}
   .renderbar{margin-top:14px}
-  .renderbar button{width:100%}
+  .renderbar{display:flex;gap:8px}
+  .renderbar #btnRender{flex:1}
+  .renderbar #btnStyle{flex:0 0 auto;font-size:14px}
   @media(max-width:980px){
     .vwrap{position:sticky;top:calc(52px + env(safe-area-inset-top));z-index:6;background:var(--card);margin:-14px -14px 0;padding:10px 14px 4px;border-radius:16px 16px 0 0;box-shadow:0 8px 16px -8px #000}
     #editor video{max-height:27vh;border-radius:10px}
@@ -214,6 +216,13 @@
   .chips button.on{background:var(--yel);color:#111;border-color:var(--yel)}
   .chips button .x{margin-left:6px;opacity:.6}
   .ppl{font-size:11px;color:var(--yel);padding:0 6px}
+  .final{position:relative}
+  .vbadge{position:absolute;left:6px;top:6px;z-index:2;font-weight:800;font-size:13px;padding:4px 9px;border-radius:20px;color:#fff;border:0;min-height:0;box-shadow:0 2px 8px #0008}
+  .vbadge.alto{background:#16a34a}.vbadge.medio{background:#d97706}.vbadge.bajo{background:#dc2626}
+  .vdetail .vbar{display:grid;grid-template-columns:90px minmax(0,1fr) 32px;gap:8px;align-items:center;font-size:13px;margin:5px 0;font-variant-numeric:tabular-nums}
+  .vdetail .vbar span{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+  .vdetail .vbar span i{display:block;height:100%;background:var(--acc)}
+  .vbig{font-family:Anton,Impact,sans-serif;font-size:54px;line-height:1}
   .copy{font-size:12px;background:#0f0f13;border:1px dashed var(--line);border-radius:8px;padding:8px;margin-top:8px}
 </style>
 </head>
@@ -429,9 +438,27 @@
         <p class="mut" style="margin:4px 0 0">Se guarda en tu biblioteca para todos tus clips (máx. 15 s). Mantén presionado un sonido tuyo para borrarlo.</p>
       </details>
 
+      <details class="esec" data-sec="ctx"><summary>🏷️ Texto de contexto <span class="sum" id="sumCtx"></span></summary>
+        <label class="chk"><input type="checkbox" id="ctxOn" checked> Mostrar etiqueta pequeña encima del video</label>
+        <input type="text" id="ctxText" value="● EN VIVO · LA CASA DE ALOFOKE 3" placeholder="● EN VIVO · LA CASA DE ALOFOKE 3">
+        <div class="chips" id="ctxIdeas" style="margin-top:6px"></div>
+        <label class="f">Dónde</label>
+        <div class="seg">
+          <label><input type="radio" name="ctxpos" value="sup_izq" checked><span>↖ Arriba izq.</span></label>
+          <label><input type="radio" name="ctxpos" value="sup_der"><span>↗ Arriba der.</span></label>
+          <label><input type="radio" name="ctxpos" value="inf"><span>⬇ Debajo</span></label>
+        </div>
+        <label class="chk" style="margin-top:6px"><input type="checkbox" id="ctxParts"> Numerar los clips de lotes y automáticos (PARTE 1/5, 2/5…)</label>
+        <p class="mut" style="margin:2px 0 0">Empieza con ● para que salga el punto rojo de "en vivo". Va pequeño y semitransparente, fuera de la zona de botones.</p>
+      </details>
+
       <details class="esec" data-sec="marca"><summary>💧 Marca de agua <span class="sum" id="sumWm"></span></summary>
         <label class="f">Tu @usuario</label>
-        <input type="text" id="wm" placeholder="@tucuenta">
+        <input type="text" id="wm" placeholder="@alofokeclips03">
+        <div class="seg" style="margin-top:6px">
+          <label><input type="radio" name="wmmode" value="fijo" checked><span>📌 Fija</span></label>
+          <label><input type="radio" name="wmmode" value="movil"><span>🛡️ Anti-robo (cambia de esquina)</span></label>
+        </div>
         <div class="row" style="margin-top:6px">
           <select id="wmPos"><option value="abajo">Abajo centro</option><option value="inf_der">Abajo derecha</option><option value="inf_izq">Abajo izquierda</option><option value="sup_der">Arriba derecha</option><option value="sup_izq">Arriba izquierda</option></select>
         </div>
@@ -481,7 +508,7 @@
         </div>
       </details>
 
-      <div class="renderbar"><button class="pri big" id="btnRender">🎬 Renderizar clip</button></div>
+      <div class="renderbar"><button id="btnStyle" title="Guardar esta configuración como Mi estilo">💾 Mi estilo</button><button class="pri big" id="btnRender">🎬 Renderizar clip</button></div>
     </div>
   </div>
 
@@ -518,6 +545,10 @@
   <div data-tab="clips" class="card">
     <h2>4 · Clips listos para subir</h2>
     <div class="chips" id="peopleFilter" style="margin-bottom:8px"></div>
+    <div class="seg" style="margin-bottom:10px">
+      <label><input type="radio" name="sortby" value="recientes" checked><span>🕒 Recientes</span></label>
+      <label><input type="radio" name="sortby" value="viral"><span>🔥 Más virales</span></label>
+    </div>
     <div class="finals" id="finals"><p class="mut">Aquí salen tus clips renderizados.</p></div>
     <div class="copy">
       <div class="mut">Copy sugerido (clic para copiar):</div>
@@ -537,6 +568,15 @@
 <div class="install" id="installTip"><button id="installX">✕</button>
   📲 <b>Instálala en tu iPhone:</b> toca <b>Compartir</b> <span style="font-size:17px">⎙</span> abajo en Safari y luego
   <b>“Agregar a pantalla de inicio”</b>. Se abrirá como una app, a pantalla completa.</div>
+
+<div class="modal hidden" id="viralModal"><div class="vdetail">
+  <div class="row" style="align-items:center"><div class="vbig" id="vScore">0%</div><div id="vLevel" style="font-weight:700"></div></div>
+  <p class="mut" style="margin:6px 0 10px">Estimación con señales del clip: no es una garantía de vistas.</p>
+  <div id="vBars"></div>
+  <h3 style="font-size:14px;margin:12px 0 4px">💡 Para subirle el porcentaje</h3>
+  <ul id="vTips" style="margin:0;padding-left:20px"></ul>
+  <button id="vClose" style="width:100%;margin-top:12px">Cerrar</button>
+</div></div>
 
 <div class="modal hidden" id="pubModal"><div>
   <h2 style="margin:0 0 10px;font-size:18px">🚀 Publicar clip</h2>
@@ -946,10 +986,11 @@ function updSummaries() {
   const st = all.find(x => x.id === hookStyle);
   $('#sumStyle').textContent = st ? '· ' + st.name : '';
   $('#sumFmt').textContent = '· ' + ({vertical: '9:16', cuadrado: '1:1', horizontal: '16:9'}[radio('fmt')]) + (radio('fmt') !== 'horizontal' ? (radio('mode') === 'fill' ? ' completa' : ' borroso') : '');
-  $('#sumWm').textContent = '· ' + ([$('#wm').value.trim(), $('#logoOn').checked ? 'logo' : ''].filter(Boolean).join(' + ') || 'ninguna');
+  $('#sumWm').textContent = '· ' + ([$('#wm').value.trim(), $('#logoOn').checked ? 'logo' : ''].filter(Boolean).join(' + ') || 'ninguna') + (radio('wmmode') === 'movil' && $('#wm').value.trim() ? ' 🛡️' : '');
   $('#sumSubs').textContent = $('#subs').checked ? '· ' + radio('substyle') : '· apagados';
   $('#sumCover').textContent = $('#coverOn').checked ? '· al inicio' : '· no';
   $('#sumSpeed').textContent = '· ' + (radio('speed') === 'rapido' ? 'rápido' : 'calidad');
+  $('#sumCtx').textContent = $('#ctxOn').checked ? '· ' + $('#ctxText').value : '· apagado';
   const nfx = sfxClip.length + ($('#sfxIntro').value ? 1 : 0);
   $('#sumSfx').textContent = nfx ? `· ${nfx} efecto${nfx > 1 ? 's' : ''}` : '· ninguno';
 }
@@ -979,6 +1020,8 @@ function getSettings() {
     subs: $('#subs').checked && !$('#subs').disabled, subs_style: radio('substyle'), subs_pos: radio('subpos'),
     cover_first: $('#coverOn').checked, cover_text: $('#coverText').value, speed: radio('speed'),
     sfx_intro: $('#sfxIntro').value, people: [...selPeople],
+    wm_mode: radio('wmmode'), ctx_on: $('#ctxOn').checked, ctx_text: $('#ctxText').value, ctx_pos: radio('ctxpos'),
+    ctx_parts: $('#ctxParts').checked,
   };
 }
 const SAVE_IDS = ['wm', 'wmPos', 'wmOp', 'logoOn', 'logoPos', 'logoSize', 'logoOp', 'subs', 'coverOn'];
@@ -1005,6 +1048,45 @@ $('#btnRender').onclick = async () => {
   if (mobile()) goTab('clips');
   refresh();
 };
+
+// ---- Mi estilo (guardado en el servidor; lo usan también los lotes y los clips automáticos)
+function setRadio(n, v) { const e = document.querySelector(`[name=${n}][value="${v}"]`); if (e) e.checked = true; }
+function applyStyle(st) {
+  const val = (id, v) => { if (v !== undefined && v !== null) $('#' + id).value = v; };
+  const chk = (id, v) => { if (v !== undefined) $('#' + id).checked = !!v; };
+  val('wm', st.watermark); val('wmPos', st.wm_pos); val('wmOp', st.wm_op); setRadio('wmmode', st.wm_mode || 'fijo');
+  chk('ctxOn', st.ctx_on); val('ctxText', st.ctx_text); setRadio('ctxpos', st.ctx_pos || 'sup_izq'); chk('ctxParts', st.ctx_parts);
+  chk('logoOn', st.logo); val('logoPos', st.logo_pos); val('logoSize', st.logo_size); val('logoOp', st.logo_op);
+  chk('subs', st.subs); if (st.subs_style) setRadio('substyle', st.subs_style); if (st.subs_pos) setRadio('subpos', st.subs_pos);
+  chk('coverOn', st.cover_first); if (st.speed) setRadio('speed', st.speed);
+  if (st.format) setRadio('fmt', st.format); if (st.mode) setRadio('mode', st.mode);
+  if (st.hook_pos) setRadio('hpos', st.hook_pos); val('hsize', st.hook_size);
+  if (st.hook_style) { hookStyle = st.hook_style; setRadio('sgroup', st.hook_style.startsWith('t:') ? 'templates' : 'simple'); }
+  if (st.sfx_intro !== undefined) { try { localStorage.setItem('sfxIntro', st.sfx_intro || ''); } catch (e) {} $('#sfxIntro').value = st.sfx_intro || ''; }
+  if (st.hook_cat) { hookCat = st.hook_cat; renderHookCats(); }
+  $('#wmOpV').textContent = $('#wmOp').value + '%';
+  if (typeof updOpts === 'function') updOpts();
+  setTimeout(updSummaries, 0);
+}
+api('/api/style').then(applyStyle).catch(() => {});
+$('#btnStyle').onclick = async () => { applyStyle(await api('/api/style', getSettings())); toast('💾 Guardado como Mi estilo: los clips automáticos saldrán así'); };
+const CTX_IDEAS = ['● EN VIVO · LA CASA DE ALOFOKE 3', 'LA CASA DE ALOFOKE 3', '● EN VIVO', '● EN VIVO · DÍA 1', 'LO QUE NO VISTE 👀', 'MOMENTO DEL DÍA 🔥'];
+$('#ctxIdeas').innerHTML = CTX_IDEAS.map(t => `<button type="button">${t}</button>`).join('');
+$('#ctxIdeas').onclick = e => { if (e.target.tagName === 'BUTTON') { $('#ctxText').value = e.target.textContent; $('#ctxOn').checked = true; updSummaries(); } };
+
+// ---- porcentaje viral
+function openViral(c) {
+  const v = c.viral; if (!v) return;
+  const names = {momento: 'Momento', arranque: 'Arranque', duracion: 'Duración', hook: 'Hook', palabras: 'Palabras', formato: 'Formato'};
+  $('#vScore').textContent = v.score + '%';
+  $('#vScore').style.color = v.level === 'alto' ? '#16a34a' : v.level === 'medio' ? '#d97706' : '#dc2626';
+  $('#vLevel').textContent = v.level === 'alto' ? '🔥 Alto potencial · súbelo ya' : v.level === 'medio' ? '⚡ Mejorable' : '💤 Bajo potencial';
+  $('#vBars').innerHTML = Object.keys(names).filter(k => k in v.parts).map(k => [k, v.parts[k]]).map(([k, x]) => `<div class="vbar">${names[k] || k}<span><i style="width:${x}%"></i></span>${x}</div>`).join('');
+  $('#vTips').innerHTML = (v.tips.length ? v.tips : ['Está listo: publícalo en hora pico (12 pm, 7 pm o 10 pm).']).map(t => `<li>${t}</li>`).join('');
+  $('#viralModal').classList.remove('hidden');
+}
+$('#vClose').onclick = () => $('#viralModal').classList.add('hidden');
+document.querySelectorAll('[name=sortby]').forEach(r => r.onchange = () => { lastSig = ''; renderLists(); });
 
 // ---- portada
 $('#coverSetT').onclick = () => { coverT = vid.currentTime; $('#coverT').textContent = fmt(coverT); };
@@ -1034,8 +1116,8 @@ function momentItems() {
   const dt = detected.map((m, i) => ({key: 'd' + i + '_' + (m.seg || m.clip_id) + '_' + m.t, label:
     (m.kind === 'anchor' ? 'Toma · hace ' + fmtLong(m.ago) : 'Toma · ' + fmt(m.start) + '–' + fmt(m.end)),
     sub: '🔥'.repeat(m.stars) + ' intensidad ' + m.score, stars: m.stars,
-    item: m.kind === 'anchor' ? {kind: 'anchor', seg: m.seg, off: m.off, before: m.before, after: m.after, label: 'Toma hace ' + fmtLong(m.ago)}
-                              : {kind: 'capture', clip_id: m.clip_id, in: m.start, out: m.end, label: 'Toma ' + fmt(m.start)}}));
+    item: m.kind === 'anchor' ? {kind: 'anchor', seg: m.seg, off: m.off, before: m.before, after: m.after, label: 'Toma hace ' + fmtLong(m.ago), score: m.score}
+                              : {kind: 'capture', clip_id: m.clip_id, in: m.start, out: m.end, label: 'Toma ' + fmt(m.start), score: m.score}}));
   return [...mk, ...dt];
 }
 let momSig = '';
@@ -1305,7 +1387,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 // ---- estado
 let lastSig = '';
 function renderLists() {
-  const sig = (state.clips || []).map(c => c.id).join() + '|' + (current ? current.id : '');
+  const sig = (state.clips || []).map(c => c.id + ((c.viral || {}).score || '')).join() + '|' + (current ? current.id : '');
   if (sig === lastSig) return; lastSig = sig;
   const caps = (state.clips || []).filter(c => c.type === 'captura');
   $('#caps').innerHTML = caps.length ? caps.map(c => `
@@ -1315,8 +1397,10 @@ function renderLists() {
       <button data-del="${c.id}">🗑</button>
     </div>`).join('') : '<p class="mut">Todavía no hay capturas.</p>';
 
-  const fins = (state.clips || []).filter(c => (c.type === 'final' || c.type === 'portada') &&
+  let fins = (state.clips || []).filter(c => (c.type === 'final' || c.type === 'portada') &&
     (!peopleFilter || (c.people || []).includes(peopleFilter)));
+  if (document.querySelector('[name=sortby]:checked').value === 'viral')
+    fins = fins.filter(c => c.type === 'final').sort((a, b) => ((b.viral || {}).score || 0) - ((a.viral || {}).score || 0));
   const esc = t => String(t || '').replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[ch]));
   $('#finals').innerHTML = fins.length ? fins.map(c => c.type === 'portada' ? `
     <div class="final">
@@ -1325,6 +1409,7 @@ function renderLists() {
       <div class="a"><a class="btn" href="/clips/${c.file}?dl=1">⬇ Bajar</a><button data-del="${c.id}">🗑</button></div>
     </div>` : `
     <div class="final">
+      ${c.viral ? `<button class="vbadge ${c.viral.level}" data-viral="${c.id}">${c.viral.level === 'alto' ? '🔥' : c.viral.level === 'medio' ? '⚡' : '💤'} ${c.viral.score}%</button>` : ''}
       <video src="/clips/${c.file}" controls preload="metadata" playsinline ${c.cover ? `poster="/clips/${c.cover}"` : ''}></video>
       <div class="mut" style="padding:4px 6px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.label)}</div>
       ${(c.people || []).length ? `<div class="ppl">👥 ${esc(peopleNames(c.people).join(', '))}</div>` : ''}
@@ -1338,6 +1423,8 @@ function renderLists() {
 document.body.addEventListener('click', async e => {
   const o = e.target.dataset.open, d = e.target.dataset.del, sh = e.target.dataset.share, pb = e.target.dataset.pub;
   if (sh) shareClip(state.clips.find(c => c.id === sh), e.target);
+  const vb = e.target.closest && e.target.closest('[data-viral]');
+  if (vb) openViral(state.clips.find(c => c.id === vb.dataset.viral));
   if (pb) openPublish(state.clips.find(c => c.id === pb));
   if (o) openClip(state.clips.find(c => c.id === o));
   if (d && confirm('¿Borrar?')) { await api('/api/clip/' + d, null, 'DELETE'); if (current && current.id === d) current = null; refresh(); }

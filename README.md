@@ -90,6 +90,23 @@ En el celular la app se organiza en pestañas abajo: **🔴 Directo · ✂️ Ed
 > PC, puedes abrirla desde el iPhone en la misma red Wi-Fi con `HOST=0.0.0.0` y la IP de la PC
 > (ej. `http://192.168.1.20:5055`), pero así no se puede instalar a pantalla completa con https.
 
+## 🔥 Porcentaje viral
+
+Cada clip terminado muestra un porcentaje (🔥 alto ≥70 %, ⚡ medio, 💤 bajo). Tócalo para ver el
+detalle y consejos. Se calcula con: intensidad del momento (30 %), arranque en los primeros 3 s (20 %),
+duración ideal 15-45 s (15 %), hook (15 %), palabras gancho en la transcripción (10 %) y formato
+(vertical, subtítulos, portada, marca de agua: 10 %). Es una estimación, no una garantía.
+En 🎬 Clips puedes ordenar por **🔥 Más virales**.
+
+## 💾 Mi estilo, 🏷️ texto de contexto y marca @alofokeclips03
+
+- **Mi estilo** (botón 💾 junto a Renderizar): guarda tu configuración en el servidor. La usan los
+  lotes y los clips automáticos aunque no abras el editor. Por defecto trae la marca
+  **@alofokeclips03** y el texto "● EN VIVO · LA CASA DE ALOFOKE 3".
+- **Marca de agua 🛡️ anti-robo**: la marca cambia de lugar cada 7 s para que no la puedan recortar.
+- **🏷️ Texto de contexto**: etiqueta pequeña y semitransparente arriba o debajo del video
+  (empieza con ● para el punto rojo de "en vivo"). Opción para numerar los lotes: PARTE 1/5…
+
 ## ✨ Clips automáticos de los mejores momentos
 
 En **🔴 Directo → Capturar** hay dos botones:

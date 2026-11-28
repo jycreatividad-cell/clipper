@@ -276,3 +276,31 @@ def _gradient_word(img, font, s, x, y, colors):
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).text((0, 0), s, font=font, fill=255)
     img.paste(grad, (int(x), int(y)), mask)
+
+
+def render_ctx(text, width=1080, scale=1.0):
+    """Etiqueta pequeña de contexto (ej. "● EN VIVO · LA CASA DE ALOFOKE 3"): píldora oscura semitransparente."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    live = text.startswith("●")
+    if live:
+        text = text.lstrip("●").strip()
+    size = max(14, int(width * 0.026 * scale))
+    font = _font("Poppins-ExtraBold.ttf", size)
+    tw = font.getlength(text)
+    dot = int(size * 0.55) if live else 0
+    padx, pady = int(size * 0.75), int(size * 0.45)
+    w = int(tw + padx * 2 + (dot + size * 0.45 if live else 0))
+    asc, desc = font.getmetrics()
+    h = asc + desc + pady * 2
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((0, 0, w - 1, h - 1), radius=h // 2, fill=(0, 0, 0, 140))
+    x = padx
+    if live:
+        cy = h / 2
+        d.ellipse((x, cy - dot / 2, x + dot, cy + dot / 2), fill=(255, 43, 43, 255))
+        x += dot + size * 0.45
+    d.text((x, pady), text, font=font, fill=(255, 255, 255, 235))
+    return im

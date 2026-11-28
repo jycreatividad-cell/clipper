@@ -784,7 +784,7 @@ def job_auto_clips(jid, d):
         raise RuntimeError("No encontré momentos fuertes. Prueba analizar más minutos o espera a que pase algo.")
     best = sorted(found, key=lambda m: m["score"], reverse=True)[:n]
     best.sort(key=lambda m: m.get("ago", 0), reverse=True) if best[0]["kind"] == "anchor" else best.sort(key=lambda m: m["start"])
-    settings = dict(d.get("settings") or {})
+    settings = {**my_style(), **(d.get("settings") or {})}
     hooks_pool = [h for h in (d.get("hooks") or []) if h.strip()]
     if not d.get("with_hook"):
         settings["hook"] = ""
@@ -799,7 +799,7 @@ def job_auto_clips(jid, d):
         item["label"] = label
         item["hook"] = (hooks_pool[(i - 1) % len(hooks_pool)] if hooks_pool else settings.get("hook", "")) if d.get("with_hook") else ""
         cid = new_job("render", label)
-        run_job(cid, job_batch_item, item, dict(settings, _label=label))
+        run_job(cid, job_batch_item, item, dict(settings, _label=label, _part=f"PARTE {i}/{len(best)}", _moment_score=m.get("score")))
         ids.append(cid)
     extra = f" (solo encontré {len(ids)} momentos distintos)" if len(ids) < n else ""
     update_job(jid, label=f"✅ {len(ids)} clip{'s' if len(ids) != 1 else ''} en camino · {source}{extra}", result={"jobs": ids})
@@ -1165,9 +1165,41 @@ def job_render(jid, opts):
         fs = int(min(W, H) * 0.042)
         op = min(1.0, max(0.1, float(opts.get("wm_op", 85)) / 100))
         x, y = corner_xy(opts.get("wm_pos", "abajo"), W, H, "text_w", "text_h", "w", "h")
+        if opts.get("wm_mode") == "movil":  # anti-robo: salta de esquina cada 7 s
+            c = [corner_xy(p, W, H, "text_w", "text_h", "w", "h") for p in ("inf_der", "sup_izq", "inf_izq", "sup_der")]
+            if H > W:  # en vertical, las posiciones de arriba van entre el hook y el video (libres de etiquetas)
+                mid = int(H * 0.30)
+                c[1] = (c[1][0], str(mid))
+                c[3] = (c[3][0], str(mid))
+            k = "mod(floor(t/7),4)"
+            x = "'" + f"if(eq({k},0),{c[0][0]},if(eq({k},1),{c[1][0]},if(eq({k},2),{c[2][0]},{c[3][0]})))" + "'"
+            y = "'" + f"if(eq({k},0),{c[0][1]},if(eq({k},1),{c[1][1]},if(eq({k},2),{c[2][1]},{c[3][1]})))" + "'"
         font_opt = f"fontfile={fontfile}:" if fontfile else ""
         add(f"drawtext={font_opt}textfile=wm.txt:fontsize={fs}:fontcolor=white@{op:.2f}:"
             f"borderw=3:bordercolor=black@{op * 0.7:.2f}:x={x}:y={y}")
+
+    # ---- texto de contexto (pequeño, no tapa la acción) y "Parte N/M" en lotes
+    def corner_png(img, name, pos):
+        img.save(work / name)
+        k = add_input(work / name)
+        m = int(W * 0.035)
+        top = int(H * 0.028) if H > W else m
+        if pos == "sup_der":
+            xy = (f"W-w-{m}", f"{top}")
+        elif pos == "inf":
+            xy = ("(W-w)/2", f"H-h-{int(H * 0.17) if H > W else m * 2}")
+        else:
+            xy = (f"{m}", f"{top}")
+        add(f"overlay={xy[0]}:{xy[1]}:eof_action=repeat", f"{k}:v")
+
+    if opts.get("ctx_on") and (opts.get("ctx_text") or "").strip():
+        img = hooks.render_ctx(opts["ctx_text"], W, 1 if H > W else 0.8)
+        if img:
+            corner_png(img, "ctx.png", opts.get("ctx_pos", "sup_izq"))
+    if opts.get("_part") and opts.get("ctx_parts"):
+        img = hooks.render_ctx(opts["_part"], W, 1 if H > W else 0.8)
+        if img:
+            corner_png(img, "part.png", "sup_der" if opts.get("ctx_pos", "sup_izq") != "sup_der" else "sup_izq")
 
     # ---- mezcla: audio del clip + efectos en su segundo
     audio_map = "0:a:0?"
@@ -1225,7 +1257,15 @@ def job_render(jid, opts):
         update_job(jid, label=(opts.get("_label") or "Renderizando clip") + "…")
         run_ffmpeg(cmd, jid=jid, total=total, cwd=str(work))
     shutil.rmtree(work, ignore_errors=True)
-    save_meta(rid, {"id": rid, "type": "final", "file": out.name, "created": time.time(),
+    meta_out = {"duration": dur, "format": fmt, "hook": hook, "transcript": opts.get("_transcript"),
+                "subs": bool(opts.get("subs")), "cover": bool(cover_file),
+                "watermark": bool((opts.get("watermark") or "").strip() or opts.get("logo")),
+                "moment_score": opts.get("_moment_score")}
+    try:
+        viral = viral_score(out, meta_out)
+    except Exception:  # noqa: BLE001
+        viral = None
+    save_meta(rid, {"id": rid, "type": "final", "file": out.name, "created": time.time(), "viral": viral,
                     "duration": dur, "format": fmt, "hook": hook, "from": opts["clip_id"],
                     "cover": cover_file.name if cover_file else None, "cat": opts.get("hook_cat"),
                     "transcript": opts.get("_transcript"),
@@ -1233,6 +1273,82 @@ def job_render(jid, opts):
                     "label": hook.replace("*", "")[:60] or src_meta.get("label") or f"Clip {fmt} {dur:.0f}s"})
     update_job(jid, result=rid)
     return rid
+
+
+# ---- porcentaje viral: estimación con señales del clip (no es una garantía)
+VIRAL_WORDS = ("mentira", "traición", "traicion", "pelea", "lío", "lio", "verdad", "confes", "nominad",
+               "elimin", "alofoke", "beso", "celos", "grit", "falta de respeto", "respeto", "llor", "secreto")
+
+
+def _clamp(x):
+    return int(max(0, min(100, round(x))))
+
+
+def viral_score(path, m):
+    lv = moments.loudness_curve(["-i", str(path)])
+    voiced = [x for x in lv if x > moments.FLOOR + 5] or [moments.FLOOR]
+    med = sorted(voiced)[len(voiced) // 2]
+    peak = max(voiced)
+    # 1. intensidad del momento (pico sobre lo normal del clip, o el puntaje del detector)
+    intensity = _clamp((peak - med) / 14 * 100)
+    if m.get("moment_score"):
+        intensity = max(intensity, _clamp(float(m["moment_score"]) / 25 * 100))
+    # 2. arranque: energía en los primeros 3 s
+    first = [x for x in lv[:int(3 / moments.STEP)] if x > moments.FLOOR + 5] or [moments.FLOOR]
+    start = _clamp((max(first) - med + 6) / 14 * 100)
+    # 3. duración ideal 15-45 s
+    d = float(m.get("duration") or 0)
+    duration = 100 if 15 <= d <= 45 else 75 if 10 <= d < 15 or 45 < d <= 60 else 50 if 60 < d <= 90 or 6 <= d < 10 else 25
+    # 4. hook
+    h = (m.get("hook") or "").strip()
+    hook = 0 if not h else _clamp(65 + (15 if "*" in h else 0) + (20 if len(h.replace("*", "")) <= 45 else 5))
+    # 5. palabras gancho (solo si hay transcripción)
+    tr = (m.get("transcript") or "").lower()
+    if tr:
+        hits = sum(1 for w in VIRAL_WORDS if w in tr) + len(people_in_text(tr))
+        words = _clamp(35 + hits * 22)
+    else:
+        words = 50
+    # 6. formato
+    fmt = _clamp((40 if m.get("format") == "vertical" else 15) + (30 if m.get("subs") else 0) +
+                 (15 if m.get("cover") else 0) + (15 if m.get("watermark") else 0))
+    parts = {"momento": intensity, "arranque": start, "duracion": duration, "hook": hook, "palabras": words, "formato": fmt}
+    score = _clamp(intensity * .30 + start * .20 + duration * .15 + hook * .15 + words * .10 + fmt * .10)
+    tips = []
+    if intensity < 45:
+        tips.append("Momento con poca energía: prueba otra toma más fuerte.")
+    if start < 45:
+        tips.append("Empieza el clip más cerca de la acción (los primeros 3 s retienen).")
+    if d > 45:
+        tips.append(f"Acórtalo a menos de 45 s (ahora dura {int(d)} s).")
+    elif d < 10:
+        tips.append("Es muy corto: dale unos segundos de contexto.")
+    if not h:
+        tips.append("Ponle un hook.")
+    elif "*" not in h:
+        tips.append("Resalta una palabra del hook con *asteriscos*.")
+    if not m.get("subs"):
+        tips.append("Activa los subtítulos.")
+    if m.get("format") != "vertical":
+        tips.append("Usa formato vertical 9:16.")
+    level = "alto" if score >= 70 else "medio" if score >= 45 else "bajo"
+    return {"score": score, "level": level, "parts": parts, "tips": tips[:3]}
+
+
+def backfill_viral():
+    """Calcula el porcentaje de los clips hechos antes de esta función."""
+    for mp in CLIPS.glob("clip_*.json"):
+        try:
+            d = json.loads(mp.read_text(encoding="utf-8"))
+            if d.get("type") != "final" or d.get("viral") or not (CLIPS / d["file"]).exists():
+                continue
+            d["viral"] = viral_score(CLIPS / d["file"], {**d, "watermark": True})
+            save_meta(d["id"], d)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+threading.Thread(target=backfill_viral, daemon=True).start()
 
 
 def job_cover(jid, opts):
@@ -1528,6 +1644,35 @@ def api_moments():
     return jsonify(job=jid)
 
 
+STYLE = DATA / "estilo.json"
+DEFAULT_STYLE = {
+    "watermark": "@alofokeclips03", "wm_pos": "abajo", "wm_op": 80, "wm_mode": "fijo",
+    "ctx_on": True, "ctx_text": "● EN VIVO · LA CASA DE ALOFOKE 3", "ctx_pos": "sup_izq", "ctx_parts": False,
+    "format": "vertical", "mode": "blur", "hook_style": "t:viral", "hook_pos": "arriba", "hook_size": 100,
+    "speed": "rapido",
+}
+
+
+def my_style():
+    try:
+        return {**DEFAULT_STYLE, **json.loads(STYLE.read_text(encoding="utf-8"))}
+    except Exception:  # noqa: BLE001
+        return dict(DEFAULT_STYLE)
+
+
+@app.get("/api/style")
+def api_style():
+    return jsonify(my_style())
+
+
+@app.post("/api/style")
+def api_style_save():
+    d = request.json or {}
+    keep = {k: v for k, v in d.items() if not k.startswith("_") and k not in ("clip_id", "in", "out", "hook", "sfx", "people", "cover_t")}
+    STYLE.write_text(json.dumps(keep, ensure_ascii=False, indent=1), encoding="utf-8")
+    return jsonify(my_style())
+
+
 @app.post("/api/auto-clips")
 def api_auto_clips():
     d = request.json or {}
@@ -1601,7 +1746,7 @@ def api_job(jid):
 def api_batch():
     """Varios clips a la vez con la misma configuración."""
     d = request.json or {}
-    items, settings = d.get("items") or [], d.get("settings") or {}
+    items, settings = d.get("items") or [], {**my_style(), **(d.get("settings") or {})}
     if not items:
         return jsonify(error="Elige al menos un momento"), 400
     if len(items) > 20:
@@ -1609,7 +1754,8 @@ def api_batch():
     ids = []
     for i, it in enumerate(items, 1):
         it.setdefault("label", f"Clip {i}/{len(items)}")
-        st = dict(settings, _label=it["label"])
+        st = dict(settings, _label=it["label"], _moment_score=it.get("score"),
+                  _part=f"PARTE {i}/{len(items)}" if len(items) > 1 else None)
         jid = new_job("render", it["label"])
         run_job(jid, job_batch_item, it, st)
         ids.append(jid)
