@@ -1172,6 +1172,19 @@ def job_batch_item(jid, item, settings):
         opts["_transcript_hint"] = item["text"]
     if item.get("hook") is not None:
         opts["hook"] = item["hook"]
+    if opts.get("ai_hook") and item.get("hook") != "" and ai_available():  # hook escrito por la IA para este clip
+        try:
+            update_job(jid, label=f"{label}: ✨ hook con IA…")
+            text = item.get("text") or transcript_for(CLIPS / json.loads(meta_path(opts["clip_id"]).read_text(encoding="utf-8"))["file"],
+                                                      opts.get("in"), opts.get("out"))
+            if len(text.split()) >= 3:
+                r = ai_hooks(text)
+                opts["hook"], opts["hook_cat"] = r["hooks"][0], r["categoria"]
+                opts["_transcript_hint"] = opts.get("_transcript_hint") or text
+                if str(opts.get("hook_style", "")).startswith("t:") and opts.get("ai_template", True):
+                    opts["hook_style"] = r["plantilla"]
+        except Exception:  # noqa: BLE001
+            pass  # si la IA falla, se queda el hook de la lista
     update_job(jid, label=f"{label}: renderizando…")
     job_render(jid, opts)
 
@@ -1566,6 +1579,15 @@ def job_render(jid, opts):
         if img:
             corner_png(img, "part.png", "sup_der" if opts.get("ctx_pos", "sup_izq") != "sup_der" else "sup_izq")
 
+    # ---- barra de progreso: avanza de izquierda a derecha durante el clip (retención)
+    if opts.get("progress_on"):
+        col = str(opts.get("progress_color") or "#FFD60A").lstrip("#")
+        col = col if re.fullmatch(r"[0-9A-Fa-f]{6}", col) else "FFD60A"
+        bh = max(6, int(H * 0.0065))
+        chain.append(f"color=c=0x{col}:s={W}x{bh}:r=30:d={dur:.3f}[pbar]")
+        y = 0 if opts.get("progress_pos", "arriba") == "arriba" else H - bh
+        add(f"overlay=x='-w+w*t/{dur:.3f}':y={y}:eof_action=pass", "pbar")
+
     # ---- mezcla: audio del clip + efectos en su segundo
     audio_map = "0:a:0?"
     audio_lbl = "0:a"
@@ -1586,28 +1608,51 @@ def job_render(jid, opts):
                      "alimiter=limit=0.95[amx]")
         audio_lbl, audio_map, src_audio = "amx", "[amx]", True
 
-    # ---- portada como primer cuadro (0.35 s antes del clip; TikTok usa el primer cuadro de portada)
+    # ---- portada al inicio (0.35 s; TikTok usa el primer cuadro) y tarjeta de cierre al final
     cover_file = None
     total = dur
+    pieces = []  # (etiqueta de video, duración) de cada pedazo extra; "main" es el clip
+
+    def still(path, secs, name):
+        k = add_input(path, ("-loop", "1", "-framerate", "30", "-t", f"{secs:.2f}"))
+        chain.append(f"[{k}:v]scale={W}:{H},setsar=1,fps=30,format=yuv420p[{name}]")
+        return name
+
     if opts.get("cover_first") and not draft:
         ct = float(opts.get("cover_t") if opts.get("cover_t") not in (None, "") else t_in + 0.5)
         cover = make_cover(src, ct, opts, W, H)
         cover.save(work / "cover.png")
         cover_file = CLIPS / f"{rid}_portada.jpg"
         cover.save(cover_file, quality=92)
-        cl = 0.35
-        k = add_input(work / "cover.png", ("-loop", "1", "-framerate", "30", "-t", str(cl)))
-        chain.append(f"[{k}:v]scale={W}:{H},setsar=1,fps=30,format=yuv420p[cv]")
+        pieces.append((still(work / "cover.png", 0.35, "cv"), 0.35))
+    pieces.append(("main", dur))
+    if opts.get("end_on") and not draft:
+        handle = (opts.get("watermark") or "").strip() or "@alofokeclips03"
+        card = hooks.render_endcard(W, H, handle if handle.startswith("@") else "@" + handle.lstrip("@"),
+                                    (opts.get("end_text1") or "SÍGUEME PARA MÁS").strip(),
+                                    (opts.get("end_text2") if opts.get("end_text2") is not None else "👉 Parte 2 en mi perfil").strip())
+        card.save(work / "end.png")
+        el = max(0.8, min(4.0, float(opts.get("end_dur", 1.5))))
+        pieces.append((still(work / "end.png", el, "ec"), el))
+    if len(pieces) > 1:
         chain.append(f"[{last}]fps=30,format=yuv420p[mv]")
+        vs, as_ = [], []
+        for i, (lbl, secs) in enumerate(pieces):
+            vs.append("[mv]" if lbl == "main" else f"[{lbl}]")
+            if src_audio:
+                if lbl == "main":
+                    chain.append(f"[{audio_lbl}]aresample=48000,aformat=channel_layouts=stereo[ma]")
+                    as_.append("[ma]")
+                else:
+                    chain.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{secs:.2f}[sil{i}]")
+                    as_.append(f"[sil{i}]")
         if src_audio:
-            chain.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{cl}[sil]")
-            chain.append(f"[{audio_lbl}]aresample=48000,aformat=channel_layouts=stereo[ma]")
-            chain.append("[cv][sil][mv][ma]concat=n=2:v=1:a=1[vout][aout]")
+            chain.append("".join(v + a for v, a in zip(vs, as_)) + f"concat=n={len(pieces)}:v=1:a=1[vout][aout]")
             audio_map = "[aout]"
         else:
-            chain.append("[cv][mv]concat=n=2:v=1:a=0[vout]")
+            chain.append("".join(vs) + f"concat=n={len(pieces)}:v=1:a=0[vout]")
         last = "vout"
-        total = dur + cl
+        total = sum(secs for _, secs in pieces)
 
     fast = opts.get("speed", "rapido") != "calidad"
     out = CLIPS / f"{rid}.mp4"
@@ -1639,7 +1684,8 @@ def job_render(jid, opts):
                     "cover": cover_file.name if cover_file else None, "cat": opts.get("hook_cat"),
                     "transcript": opts.get("_transcript"),
                     "people": sorted(set((opts.get("people") or []) + people_in_text(opts.get("_transcript") or opts.get("_transcript_hint")))),
-                    "label": hook.split("|")[0].replace("*", "").strip()[:60] or src_meta.get("label") or f"Clip {fmt} {dur:.0f}s"})
+                    "label": (hook.split("|")[0].replace("*", "").strip()[:60] or src_meta.get("label") or f"Clip {dur:.0f}s")
+                             + ("" if fmt == "vertical" else {"cuadrado": " · 1:1", "horizontal": " · 16:9"}.get(fmt, ""))})
     update_job(jid, result=rid)
     return rid
 
@@ -1962,6 +2008,20 @@ def custom_sound(name):
     return send_from_directory(SOUNDS_DIR, name)
 
 
+@app.get("/api/endcard.jpg")
+def api_endcard():
+    from io import BytesIO
+    from flask import Response
+    a = request.args
+    W, H = FORMATS.get(a.get("format", "vertical"), FORMATS["vertical"])
+    handle = a.get("handle", "@alofokeclips03").strip() or "@alofokeclips03"
+    img = hooks.render_endcard(W // 3, H // 3, handle if handle.startswith("@") else "@" + handle,
+                               a.get("t1", "SÍGUEME PARA MÁS"), a.get("t2", "👉 Parte 2 en mi perfil"))
+    buf = BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    return Response(buf.getvalue(), mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/hook-styles")
 def api_hook_styles():
     import templates
@@ -2030,9 +2090,15 @@ def api_render():
     d = request.json or {}
     if not d.get("clip_id") or not meta_path(d["clip_id"]).exists():
         return jsonify(error="Captura no encontrada"), 404
-    jid = new_job("render", "Renderizando clip…")
-    run_job(jid, job_render, d)
-    return jsonify(job=jid)
+    names = {"vertical": "9:16", "cuadrado": "1:1", "horizontal": "16:9"}
+    fmts = [d.get("format", "vertical")] + [f for f in (d.get("extra_formats") or []) if f in names and f != d.get("format")]
+    ids = []
+    for f in fmts:  # el mismo clip en cada formato pedido
+        label = "Renderizando clip" + (f" · {names[f]}" if len(fmts) > 1 else "")
+        jid = new_job("render", label + "…")
+        run_job(jid, job_render, dict(d, format=f, _label=label))
+        ids.append(jid)
+    return jsonify(job=ids[0], jobs=ids)
 
 
 # ---- marcadores (tecla M) y tomas importantes
@@ -2788,6 +2854,110 @@ COPY_SCHEMA = {
 }
 
 
+def claude_json(system, prompt, schema, max_tokens=2000):
+    """Pide a Claude una respuesta JSON con el esquema dado. Errores explicados en español."""
+    import anthropic
+    client = anthropic.Anthropic()
+    try:
+        resp = client.beta.messages.create(
+            model=COPY_MODEL,
+            max_tokens=max_tokens,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",                      # si el modelo rechaza, la API reintenta con otro
+            output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.AuthenticationError as e:
+        raise RuntimeError("La clave de Anthropic (ANTHROPIC_API_KEY) no es válida. Revísala en Railway.") from e
+    except anthropic.PermissionDeniedError as e:
+        raise RuntimeError("Tu clave de Anthropic no tiene permiso o no tiene saldo. Revisa tu cuenta en console.anthropic.com.") from e
+    except anthropic.RateLimitError as e:
+        raise RuntimeError("Demasiadas peticiones a la IA. Espera un minuto y vuelve a intentar.") from e
+    except anthropic.APIStatusError as e:
+        raise RuntimeError(f"La IA dio un error ({e.status_code}). Intenta otra vez en un momento.") from e
+    except anthropic.APIConnectionError as e:
+        raise RuntimeError("El servidor no pudo conectarse con la IA. Revisa la conexión.") from e
+    if resp.stop_reason == "refusal":
+        raise RuntimeError("La IA no quiso escribir sobre este clip.")
+    text = next((b.text for b in resp.content if b.type == "text"), "")
+    return json.loads(text)
+
+
+# ---- hook con IA: Claude lee lo que se dice en el clip y escribe el gancho
+CAT_TPL = {"pelea": "t:polemica", "romance": "t:revelacion", "nominacion": "t:alerta", "chisme": "t:verdad",
+           "risa": "t:humor", "alofoke": "t:noticias", "estrategia": "t:impacto", "fiesta": "t:viral",
+           "emotivo": "t:reflexion", "gancho": "t:curiosidad"}
+HOOK_SYSTEM = """Escribes los hooks (texto grande al inicio del video) de clips virales de "La Casa de Alofoke 3",
+un reality dominicano en vivo. Te paso lo que se dice en el clip (transcripción automática, puede tener errores).
+
+Reglas para cada hook:
+- MAYÚSCULAS, máximo 7 palabras y 45 caracteres. Español dominicano natural.
+- Marca UNA palabra clave entre asteriscos para resaltarla, así: SE ARMÓ EL *LÍO*.
+- Puede llevar un emoji al final (😱 👀 🔥 😂 💘 🐍 😳), no más de uno.
+- Basado en lo que pasa en el clip. No inventes nombres, hechos ni frases que no estén en la transcripción.
+- Nada de insultos, burlas a personas reales, contenido sexual ni acusaciones presentadas como hechos.
+- Los 3 hooks distintos entre sí: uno de curiosidad, uno de impacto y uno de pregunta.
+Elige también el tipo de momento que mejor describe el clip."""
+HOOK_SCHEMA = {
+    "type": "object",
+    "properties": {"hooks": {"type": "array", "items": {"type": "string"}},
+                   "categoria": {"type": "string", "enum": list(CAT_TPL)}},
+    "required": ["hooks", "categoria"],
+    "additionalProperties": False,
+}
+
+
+def transcript_for(path, t_in=0.0, t_out=None):
+    """Lo que se dice en un tramo del video ('' si no hay reconocimiento de voz)."""
+    if not _has_whisper():
+        return ""
+    wav = TMP / f"tr_{uuid.uuid4().hex[:8]}.wav"
+    args = ["-ss", f"{float(t_in or 0):.2f}", "-i", str(path)]
+    if t_out:
+        args += ["-t", f"{max(1.0, float(t_out) - float(t_in or 0)):.2f}"]
+    try:
+        run_ffmpeg([*args, "-vn", "-ac", "1", "-ar", "16000", "-t", "180", str(wav)])
+        return " ".join(w[2] for w in transcribe_words(wav))
+    finally:
+        wav.unlink(missing_ok=True)
+
+
+def ai_hooks(transcript, duration=None):
+    prompt = (f"Duración del clip: {int(duration or 0)} segundos\n"
+              f"Lo que se dice en el clip:\n{transcript[:4000]}\n\nEscribe 3 hooks y el tipo de momento.")
+    r = claude_json(HOOK_SYSTEM, prompt, HOOK_SCHEMA, 1500)
+    hooks_out = [h.strip() for h in r.get("hooks", []) if h.strip()][:3]
+    if not hooks_out:
+        raise RuntimeError("La IA no devolvió hooks. Intenta otra vez.")
+    cat = r.get("categoria") if r.get("categoria") in CAT_TPL else "gancho"
+    return {"hooks": hooks_out, "categoria": cat, "plantilla": CAT_TPL[cat]}
+
+
+def job_hook_ai(jid, d):
+    meta = json.loads(meta_path(d["clip_id"]).read_text(encoding="utf-8"))
+    update_job(jid, label="👂 Escuchando lo que se dice…", progress=15)
+    text = transcript_for(CLIPS / meta["file"], d.get("in"), d.get("out"))
+    if len(text.split()) < 3:
+        raise RuntimeError("No se entiende lo que se dice en ese tramo (o no hay reconocimiento de voz instalado).")
+    update_job(jid, label="✨ La IA está escribiendo hooks…", progress=60)
+    update_job(jid, result=dict(ai_hooks(text, meta.get("duration")), transcript=text[:500]))
+
+
+@app.post("/api/hook-ai")
+def api_hook_ai():
+    d = request.json or {}
+    if not ai_available():
+        return jsonify(error="La IA no está configurada: agrega ANTHROPIC_API_KEY en Railway."), 400
+    if not _has_whisper():
+        return jsonify(error="Para el hook con IA hace falta el reconocimiento de voz (subtítulos instalados)."), 400
+    if not re.fullmatch(r"[A-Za-z0-9_]+", d.get("clip_id", "")) or not meta_path(d["clip_id"]).exists():
+        return jsonify(error="Captura no encontrada"), 404
+    jid = new_job("hook", "✨ Hook con IA…")
+    run_job(jid, job_hook_ai, d)
+    return jsonify(job=jid)
+
+
 def ai_available():
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         return False
@@ -2799,7 +2969,6 @@ def ai_available():
 
 
 def job_copy_ai(jid, d):
-    import anthropic
     cid = d.get("clip_id", "")
     meta = json.loads(meta_path(cid).read_text(encoding="utf-8")) if re.fullmatch(r"[A-Za-z0-9_]+", cid) and meta_path(cid).exists() else {}
     transcript = meta.get("transcript") or ""
@@ -2822,38 +2991,11 @@ def job_copy_ai(jid, d):
               f"Lo que se dice en el clip (transcripción automática, puede tener errores):\n"
               f"{transcript[:4000] or '(no hay transcripción: básate solo en el hook y el tipo de momento)'}\n\n"
               "Escribe 3 copys virales para este clip.")
-    client = anthropic.Anthropic()
-    try:
-        resp = _copy_request(client, prompt)
-    except anthropic.AuthenticationError as e:
-        raise RuntimeError("La clave de Anthropic (ANTHROPIC_API_KEY) no es válida. Revísala en Railway.") from e
-    except anthropic.PermissionDeniedError as e:
-        raise RuntimeError("Tu clave de Anthropic no tiene permiso o no tiene saldo. Revisa tu cuenta en console.anthropic.com.") from e
-    except anthropic.RateLimitError as e:
-        raise RuntimeError("Demasiadas peticiones a la IA. Espera un minuto y vuelve a intentar.") from e
-    except anthropic.APIStatusError as e:
-        raise RuntimeError(f"La IA dio un error ({e.status_code}). Intenta otra vez en un momento.") from e
-    except anthropic.APIConnectionError as e:
-        raise RuntimeError("El servidor no pudo conectarse con la IA. Revisa la conexión.") from e
-    if resp.stop_reason == "refusal":
-        raise RuntimeError("La IA no quiso escribir sobre este clip. Usa el generador 🎲.")
-    text = next((b.text for b in resp.content if b.type == "text"), "")
-    copys = [c.strip() for c in json.loads(text).get("copys", []) if c.strip()][:5]
+    r = claude_json(COPY_SYSTEM, prompt, COPY_SCHEMA)
+    copys = [c.strip() for c in r.get("copys", []) if c.strip()][:5]
     if not copys:
         raise RuntimeError("La IA no devolvió copys. Intenta otra vez.")
     update_job(jid, label="Copys listos ✨", result={"copys": copys, "transcribed": bool(transcript)})
-
-
-def _copy_request(client, prompt):
-    return client.beta.messages.create(
-        model=COPY_MODEL,
-        max_tokens=2000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",                      # si el modelo rechaza, la API reintenta con otro
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": COPY_SCHEMA}},
-        system=COPY_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-    )
 
 
 @app.post("/api/copy-ai")

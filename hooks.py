@@ -307,3 +307,62 @@ def render_ctx(text, width=1080, scale=1.0):
         x += dot + size * 0.45
     d.text((x, pady), text, font=font, fill=(255, 255, 255, 235))
     return im
+
+
+def render_endcard(W, H, handle="@alofokeclips03", line1="SÍGUEME PARA MÁS", line2="👉 Parte 2 en mi perfil"):
+    """Tarjeta final de marca (pantalla completa)."""
+    img = Image.new("RGB", (W, H))
+    top, bot = (232, 25, 79), (109, 40, 217)
+    d = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y / H
+        d.line([(0, y), (W, y)], fill=tuple(int(top[i] + (bot[i] - top[i]) * t) for i in range(3)))
+    img = img.convert("RGBA")
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((-W * .3, -H * .2, W * .9, H * .45), fill=(255, 255, 255, 45))
+    img = Image.alpha_composite(img, glow.filter(ImageFilter.GaussianBlur(W * .08)))
+    d = ImageDraw.Draw(img)
+    base = min(W, H)
+    f1 = _font("Anton-Regular.ttf", int(base * 0.12))
+    words, lines, cur = (line1 or "").upper().split(), [], ""
+    for w in words:  # partir el título en líneas que quepan
+        test = (cur + " " + w).strip()
+        if f1.getlength(test) > W * 0.86 and cur:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = test
+    if cur:
+        lines.append(cur)
+    asc, desc = f1.getmetrics()
+    lh = int((asc + desc) * 0.98)
+    y = H * 0.5 - (len(lines) * lh) / 2 - base * 0.12
+    for ln in lines:
+        d.text((W / 2 + 4, y + 6), ln, font=f1, fill=(0, 0, 0, 90), anchor="ma")
+        d.text((W / 2, y), ln, font=f1, fill="#FFFFFF", anchor="ma")
+        y += lh
+    # @usuario en píldora blanca
+    f2 = _font("Poppins-Black.ttf", int(base * 0.055))
+    hw = f2.getlength(handle)
+    py = y + base * 0.05
+    ph = int(base * 0.1)
+    d.rounded_rectangle((W / 2 - hw / 2 - base * .05, py, W / 2 + hw / 2 + base * .05, py + ph), radius=ph // 2, fill="#FFFFFF")
+    d.text((W / 2, py + ph / 2), handle, font=f2, fill="#E8194F", anchor="mm")
+    # segunda línea (con emoji)
+    if line2:
+        f3 = _font("Poppins-ExtraBold.ttf", int(base * 0.045))
+        y3 = py + ph + base * 0.06
+        pieces = _pieces(line2)
+        size = int(base * 0.045)
+        total = sum((_emoji(t, size).width if k == "e" and _emoji(t, size) else f3.getlength(t)) for k, t in pieces)
+        x = W / 2 - total / 2
+        for k, t in pieces:
+            if k == "e":
+                em = _emoji(t, size)
+                if em:
+                    img.alpha_composite(em, (int(x), int(y3)))
+                    x += em.width
+            else:
+                d.text((x, y3), t, font=f3, fill="#FFFFFF")
+                x += f3.getlength(t)
+    return img.convert("RGB")

@@ -141,6 +141,7 @@
   .netbtns .ig{background:linear-gradient(45deg,#f9a825,#e91e63,#7b1fa2);border:0}
   .netbtns .fb{background:#1877F2;border:0}
   .netbtns .wa{background:#1fa855;border:0}
+  .netbtns .yt{background:#e00;border:0}
   .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom));z-index:30;
     background:#22c55e;color:#04130a;font-weight:700;padding:12px 16px;border-radius:12px;max-width:92vw;box-shadow:0 10px 30px #000a;font-size:14px}
   .modal>div{max-height:92vh;overflow:auto}
@@ -408,6 +409,12 @@
       <details class="esec" open data-sec="hook"><summary>✍️ Hook <span class="sum" id="sumHook"></span></summary>
         <textarea id="hook" placeholder="Ej: SE ARMÓ EL *LÍO* EN LA CASA 😱"></textarea>
         <p class="mut" style="margin:4px 0">*Entre asteriscos* = palabra resaltada en color. Los emojis salen a color.</p>
+        <div class="row" id="aiHookRow" style="margin:6px 0">
+          <button type="button" id="aiHookBtn" style="background:#5b21b6;border-color:#7c3aed;flex:0 0 auto">✨ Hook con IA</button>
+          <span class="mut" id="aiHookNote" style="flex:1"></span>
+        </div>
+        <div class="aiopts" id="aiHookOpts"></div>
+        <label class="chk mut"><input type="checkbox" id="aiHookAuto"> 🤖 En el piloto y los clips automáticos, que la IA escriba un hook para cada clip</label>
         <div class="hookcats" id="hookCats"></div>
         <div class="row ideas" id="hookIdeas"></div>
       </details>
@@ -460,6 +467,10 @@
           <label><input type="radio" name="fmt" value="cuadrado"><span>1:1</span></label>
           <label><input type="radio" name="fmt" value="horizontal"><span>16:9</span></label>
         </div>
+        <div class="row mut" style="margin-top:6px">También en:
+          <label class="chk" style="flex:0 0 auto"><input type="checkbox" id="xfCuadrado"> 1:1</label>
+          <label class="chk" style="flex:0 0 auto"><input type="checkbox" id="xfHorizontal"> 16:9</label>
+        </div>
         <div id="vertOpts">
           <div class="seg" style="margin-top:8px">
             <label><input type="radio" name="mode" value="blur" checked><span>Fondo borroso</span></label>
@@ -471,6 +482,26 @@
           <label class="f">Zoom: <span id="zoomV">100%</span></label>
           <input type="range" id="zoom" min="100" max="200" value="100">
         </div>
+      </details>
+
+      <details class="esec" data-sec="cierre"><summary>🏁 Cierre y barra <span class="sum" id="sumEnd"></span></summary>
+        <label class="chk"><input type="checkbox" id="progOn"> Barra de progreso (avanza durante el clip)</label>
+        <div class="row">
+          <div class="seg" style="flex:1">
+            <label><input type="radio" name="progpos" value="arriba" checked><span>Arriba</span></label>
+            <label><input type="radio" name="progpos" value="abajo"><span>Abajo</span></label>
+          </div>
+          <input type="color" id="progColor" value="#FFD60A" style="flex:0 0 52px;height:40px;border:0;background:none">
+        </div>
+        <label class="chk" style="margin-top:8px"><input type="checkbox" id="endOn"> Tarjeta de cierre al final</label>
+        <input type="text" id="endText1" placeholder="SÍGUEME PARA MÁS">
+        <input type="text" id="endText2" placeholder="👉 Parte 2 en mi perfil" style="margin-top:6px">
+        <div class="row" style="margin-top:6px">
+          <label class="mut">Duración <select id="endDur"><option value="1">1 s</option><option value="1.5" selected>1.5 s</option><option value="2.5">2.5 s</option></select></label>
+          <button type="button" id="endPreview" style="flex:0 0 auto">👁 Ver tarjeta</button>
+        </div>
+        <img id="endImg" class="hidden" style="width:45%;border-radius:10px;margin-top:8px">
+        <p class="mut" style="margin:4px 0 0">Usa tu @ de la marca de agua. No se agrega en los borradores.</p>
       </details>
 
       <details class="esec" data-sec="sfx"><summary>🔊 Efectos de sonido <span class="sum" id="sumSfx"></span></summary>
@@ -665,6 +696,7 @@
     <button class="ig" data-net="instagram"><b>📸</b>Instagram</button>
     <button class="fb" data-net="facebook"><b>📘</b>Facebook</button>
     <button class="wa" data-net="whatsapp"><b>💬</b>WhatsApp</button>
+    <button class="yt" data-net="youtube"><b>▶️</b>YouTube</button>
     <button data-net="fotos"><b>⬇️</b>Guardar video</button>
     <button data-net="copy"><b>📋</b>Solo copiar copy</button>
   </div>
@@ -1089,6 +1121,7 @@ function updSummaries() {
   $('#sumSubs').textContent = $('#subs').checked ? '· ' + radio('substyle') : '· apagados';
   $('#sumCover').textContent = $('#coverOn').checked ? '· al inicio' : '· no';
   $('#sumSpeed').textContent = '· ' + (radio('speed') === 'rapido' ? 'rápido' : 'calidad');
+  $('#sumEnd').textContent = '· ' + ([$('#progOn').checked ? 'barra' : '', $('#endOn').checked ? 'cierre' : ''].filter(Boolean).join(' + ') || 'nada');
   $('#sumCtx').textContent = $('#ctxOn').checked ? '· ' + $('#ctxText').value : '· apagado';
   const nfx = sfxClip.length + ($('#sfxIntro').value ? 1 : 0);
   $('#sumSfx').textContent = nfx ? `· ${nfx} efecto${nfx > 1 ? 's' : ''}` : '· ninguno';
@@ -1120,6 +1153,9 @@ function getSettings() {
     cover_first: $('#coverOn').checked, cover_text: $('#coverText').value, speed: radio('speed'),
     sfx_intro: $('#sfxIntro').value, people: [...selPeople],
     wm_mode: radio('wmmode'), ctx_on: $('#ctxOn').checked, ctx_text: $('#ctxText').value, ctx_pos: radio('ctxpos'),
+    ai_hook: $('#aiHookAuto').checked, progress_on: $('#progOn').checked, progress_pos: radio('progpos'),
+    progress_color: $('#progColor').value, end_on: $('#endOn').checked, end_text1: $('#endText1').value,
+    end_text2: $('#endText2').value || null, end_dur: +$('#endDur').value,
     ctx_parts: $('#ctxParts').checked,
   };
 }
@@ -1142,7 +1178,9 @@ $('#wmOpV').textContent = $('#wmOp').value + '%';
 $('#btnRender').onclick = async () => {
   if (!current) return;
   saveSettings();
-  await api('/api/render', {clip_id: current.id, in: inT, out: outT, ...getSettings(), sfx: sfxClip,
+  const extra = [['cuadrado', '#xfCuadrado'], ['horizontal', '#xfHorizontal']].filter(([, id]) => $(id).checked).map(([f]) => f);
+  if (extra.length) toast(`🎬 Se hará en ${1 + extra.length} formatos`);
+  await api('/api/render', {clip_id: current.id, in: inT, out: outT, ...getSettings(), sfx: sfxClip, extra_formats: extra,
     cover_t: coverT === null ? null : coverT});
   if (mobile()) goTab('clips');
   refresh();
@@ -1155,6 +1193,9 @@ function applyStyle(st) {
   const chk = (id, v) => { if (v !== undefined) $('#' + id).checked = !!v; };
   val('wm', st.watermark); val('wmPos', st.wm_pos); val('wmOp', st.wm_op); setRadio('wmmode', st.wm_mode || 'fijo');
   chk('ctxOn', st.ctx_on); val('ctxText', st.ctx_text); setRadio('ctxpos', st.ctx_pos || 'sup_izq'); chk('ctxParts', st.ctx_parts);
+  chk('aiHookAuto', st.ai_hook); chk('progOn', st.progress_on); if (st.progress_pos) setRadio('progpos', st.progress_pos);
+  val('progColor', st.progress_color); chk('endOn', st.end_on); val('endText1', st.end_text1);
+  if (st.end_text2 !== undefined && st.end_text2 !== null) $('#endText2').value = st.end_text2; if (st.end_dur) $('#endDur').value = String(st.end_dur);
   chk('logoOn', st.logo); val('logoPos', st.logo_pos); val('logoSize', st.logo_size); val('logoOp', st.logo_op);
   chk('subs', st.subs); if (st.subs_style) setRadio('substyle', st.subs_style); if (st.subs_pos) setRadio('subpos', st.subs_pos);
   chk('coverOn', st.cover_first); if (st.speed) setRadio('speed', st.speed);
@@ -1306,6 +1347,42 @@ $('#pushOn').onclick = async () => {
     await api('/api/push/subscribe', {subscription: sub.toJSON()});
     toast('🔔 Avisos activados'); refresh();
   } catch (e) { if (e.message !== 'login') alert('No se pudieron activar los avisos: ' + e.message); }
+};
+
+// ---- hook con IA
+$('#aiHookBtn').onclick = async () => {
+  if (!current) return;
+  const b = $('#aiHookBtn'); b.disabled = true; b.textContent = '✨ Escuchando…';
+  try {
+    const {job} = await api('/api/hook-ai', {clip_id: current.id, in: inT, out: outT});
+    for (let i = 0; i < 240; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const j = await api('/api/job/' + job);
+      if (j.status === 'trabajando') { b.textContent = j.label; continue; }
+      if (j.status === 'error') { alert(j.error); break; }
+      const r = j.result || {};
+      $('#aiHookOpts').innerHTML = (r.hooks || []).map((h, k) => `<button type="button" data-aih="${k}">${h.replace(/</g, '&lt;')}</button>`).join('');
+      $('#aiHookOpts').onclick = e => {
+        const x = e.target.closest('[data-aih]'); if (!x) return;
+        $('#hook').value = r.hooks[+x.dataset.aih];
+        hookCat = r.categoria || hookCat; renderHookCats();
+        if (document.querySelector('[name=sgroup]:checked').value === 'templates' && r.plantilla) {
+          hookStyle = r.plantilla; syncTplFields();
+          document.querySelectorAll('#styles button').forEach(y => y.classList.toggle('sel', y.dataset.style === hookStyle));
+        }
+        document.querySelectorAll('#aiHookOpts button').forEach(y => y.classList.toggle('on', y === x));
+        updCaption(); updPreview(false); updSummaries();
+      };
+      const first = $('#aiHookOpts button'); if (first) first.click();
+      break;
+    }
+  } catch (e) {}
+  b.disabled = false; b.textContent = '✨ Hook con IA';
+};
+$('#endPreview').onclick = () => {
+  const q = new URLSearchParams({handle: ($('#wm').value || '@alofokeclips03'), t1: $('#endText1').value || 'SÍGUEME PARA MÁS',
+    t2: $('#endText2').value || '👉 Parte 2 en mi perfil', format: radio('fmt')});
+  $('#endImg').src = '/api/endcard.jpg?' + q; $('#endImg').classList.remove('hidden');
 };
 
 // ---- porcentaje viral
@@ -1477,6 +1554,7 @@ const NET = {
   tiktok: {name: 'TikTok', web: 'https://www.tiktok.com/tiktokstudio/upload'},
   instagram: {name: 'Instagram', web: 'https://www.instagram.com/'},
   facebook: {name: 'Facebook', web: 'https://www.facebook.com/reels/create'},
+  youtube: {name: 'YouTube', web: 'https://studio.youtube.com/'},
   whatsapp: {name: 'WhatsApp', web: 'https://web.whatsapp.com/'},
 };
 function download(c) {
@@ -1484,8 +1562,14 @@ function download(c) {
   document.body.appendChild(a); a.click(); a.remove();
 }
 // net: tiktok | instagram | facebook | whatsapp | fotos | copy
+function ytText(c, captionText) {  // título y descripción para YouTube (Shorts si es vertical)
+  const base = (c.hook || c.label || '').split('|')[0].replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+  const title = (base ? base.charAt(0) + base.slice(1).toLowerCase() : 'Momento') + ' | La Casa de Alofoke 3';
+  const vertical = !c.format || c.format === 'vertical';
+  return title.slice(0, 100) + '\n\n' + withTags(captionText, 'tiktok').replace('#fyp #parati #viral #tiktokrd', '') + (vertical ? ' #Shorts' : '');
+}
 async function sendTo(c, net, captionText, btn) {
-  const caption = net === 'fotos' ? '' : withTags(captionText, net === 'copy' ? 'tiktok' : net);
+  const caption = net === 'fotos' ? '' : net === 'youtube' ? ytText(c, captionText) : withTags(captionText, net === 'copy' ? 'tiktok' : net);
   if (caption && navigator.clipboard) navigator.clipboard.writeText(caption).catch(() => {});  // dentro del toque
   if (net === 'copy') return toast('✅ Copy copiado');
   if (!canShareFiles()) {  // computadora: bajar video + abrir la página de subida
@@ -1715,6 +1799,9 @@ async function refresh() {
   $('#clipsBadge').textContent = newClips; $('#clipsBadge').style.display = newClips ? 'block' : 'none';
   renderAccounts(); renderMoments(false); pilotFromState(); pushStatus();
   $('#subsNote').textContent = state.subs_available ? '' : '(no instalado en este equipo: ver README)';
+  $('#aiHookBtn').disabled = !(state.ai && state.smart);
+  $('#aiHookNote').textContent = state.ai && state.smart ? 'Escucha el tramo marcado y escribe 3 hooks de ese momento.'
+    : !state.ai ? 'Necesita la clave de Anthropic en Railway (README).' : 'Necesita el reconocimiento de voz (subtítulos instalados).';
   $('#subs').disabled = !state.subs_available;
 
   $('#jobs').innerHTML = state.jobs.length ? state.jobs.map(j => `

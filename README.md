@@ -150,6 +150,17 @@ En el editor → **🎨 Estilo del hook → ✍️ Formas (8)**: 💬 Mensaje de
   sigue igual), con un enlace que abre la sección de cookies; y te avisa cuando vuelve a funcionar.
   También revisa al guardar cookies nuevas y cuando falla la grabación.
 
+## ✨ Hook con IA, 🏁 cierre y barra, 📐 varios formatos
+
+- **✨ Hook con IA** (Editor → Hook): escucha el tramo marcado y Claude escribe 3 hooks de ese momento
+  exacto, elige el tipo de momento y la plantilla. Con **🤖 En el piloto y los clips automáticos…**
+  (guárdalo en 💾 Mi estilo) cada clip automático sale con su propio hook; si la IA falla, usa uno de
+  la lista. Necesita `ANTHROPIC_API_KEY` y el reconocimiento de voz (subtítulos instalados).
+- **🏁 Cierre y barra:** barra de progreso arriba o abajo (color a elegir) y tarjeta de cierre al final
+  ("SÍGUEME PARA MÁS · @tu_usuario · 👉 Parte 2 en mi perfil", 1 / 1.5 / 2.5 s). No se agregan en borradores.
+- **Varios formatos:** en Formato marca "También en 1:1 / 16:9" y el mismo clip sale en todos.
+  En Publicar, **▶️ YouTube** copia un título y una descripción listos (con #Shorts si es vertical).
+
 ## 🤖 Piloto automático
 
 En **🔴 Directo → 🤖 Piloto automático** enciende el interruptor. Mientras se graba el directo, cada
