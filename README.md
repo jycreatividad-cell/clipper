@@ -135,6 +135,21 @@ En el editor → **🎨 Estilo del hook → ✍️ Formas (8)**: 💬 Mensaje de
 - **Más potencia:** los renders a la vez se ajustan solos a los núcleos del servidor (máx. 4); puedes
   fijarlo con `RENDER_WORKERS`.
 
+## 💬 Chat del directo, 🎯 encuadre inteligente y 🔎 vigilancia de cookies
+
+- **Chat del directo:** al grabar un directo de YouTube, la app también descarga el chat y cuenta los
+  mensajes por minuto (los Super Chats cuentan más). Cuando el chat explota, sube el puntaje de la
+  toma que incluye ese momento, o crea una toma nueva si el audio no lo había detectado. Lo usan
+  "Buscar tomas importantes", los clips automáticos y el piloto. Debajo del estado de grabación se ve
+  el ritmo del chat en vivo. (Por ahora solo en directos en curso.)
+- **🎯 Sigue caras:** en Formato → vertical. Detecta dónde hay caras en el video (no quién es) con el
+  modelo YuNet de OpenCV y mueve el recorte suavemente para que no se corte a quien habla. Si no
+  encuentra caras, queda como "Pantalla completa".
+- **Vigilancia de cookies:** cada hora prueba si YouTube deja leer el directo (variable
+  `COOKIE_CHECK_MIN`). Si YouTube bloquea al servidor te avisa al iPhone una vez (y otra cada 6 h si
+  sigue igual), con un enlace que abre la sección de cookies; y te avisa cuando vuelve a funcionar.
+  También revisa al guardar cookies nuevas y cuando falla la grabación.
+
 ## 🤖 Piloto automático
 
 En **🔴 Directo → 🤖 Piloto automático** enciende el interruptor. Mientras se graba el directo, cada

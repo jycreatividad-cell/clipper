@@ -15,3 +15,5 @@ piloto.json
 vapid_private.pem
 cola.json
 aprendizaje.json
+chat/
+ultimo_url.txt

@@ -32,6 +32,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import hooks
 import moments
+import smartcrop
 from social import Social
 
 BASE = Path(__file__).resolve().parent
@@ -254,18 +255,15 @@ def api_cookies():
         return jsonify(error="Esas cookies no son de youtube.com. Exporta estando en youtube.com."), 400
     names = {ln.split("\t")[5] for ln in yt if len(ln.split("\t")) >= 7}
     COOKIES.write_text(data, encoding="utf-8")
+    threading.Thread(target=run_health_check, daemon=True).start()
     logged = any(n in names for n in LOGIN_COOKIES)
     return jsonify(ok=True, count=len(yt), logged=logged,
                    warning=None if logged else "Ojo: no veo la sesión iniciada en esas cookies. Entra a YouTube con tu "
                                                 "cuenta secundaria antes de exportarlas.")
 
 
-@app.post("/api/yt-test")
-def api_yt_test():
-    """Prueba si el servidor puede leer el video de YouTube con las cookies actuales."""
-    url = ((request.get_json(silent=True) or {}).get("url") or rec.url or "").strip()
-    if not url:
-        return jsonify(error="Pega primero el link del directo"), 400
+def yt_probe(url):
+    """-> (ok, mensaje). Prueba si el servidor puede leer el video, probando los tipos de cliente."""
     names = {"": "normal", "tv": "TV", "web_safari": "Safari", "mweb": "móvil"}
     for client in [yt_state["client"]] + [c for c in PLAYER_CLIENTS if c != yt_state["client"]]:
         try:
@@ -276,10 +274,68 @@ def api_yt_test():
         if p.returncode == 0 and p.stdout.strip():
             yt_state["client"] = client
             extra = "" if not client else f" (entrando como cliente {names[client]})"
-            return jsonify(ok=True, message="✅ YouTube responde bien" + extra + ": " + p.stdout.strip().splitlines()[0][:100])
+            return True, "✅ YouTube responde bien" + extra + ": " + p.stdout.strip().splitlines()[0][:100]
         if "connect" in (p.stderr or "").lower() and "unable" in (p.stderr or "").lower():
             break  # sin red: no tiene sentido probar los demás
-    return jsonify(ok=False, message=clean_error(diagnose(url)))
+    return False, clean_error(diagnose(url))
+
+
+LAST_URL = DATA / "ultimo_url.txt"
+yt_health = {"ok": None, "checked": None, "msg": "", "notified": 0, "busy": False}
+COOKIE_CHECK_MIN = int(os.environ.get("COOKIE_CHECK_MIN", "60"))
+
+
+def health_url():
+    if rec.url and rec.url.startswith("http"):
+        return rec.url
+    try:
+        return LAST_URL.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def run_health_check(reason="revisión"):
+    url = health_url()
+    if not url or yt_health["busy"]:
+        return
+    yt_health["busy"] = True
+    try:
+        ok, msg = yt_probe(url)
+        prev = yt_health["ok"]
+        yt_health.update(ok=ok, msg=msg, checked=time.time())
+        blocked = (not ok) and ("bloqueando" in msg or "imágenes" in msg or "Falta un motor" in msg)
+        if blocked and (prev is not False or time.time() - yt_health["notified"] > 6 * 3600):
+            yt_health["notified"] = time.time()
+            notify("⚠️ YouTube bloqueó al servidor", "Las cookies vencieron o YouTube pide verificación. Toca para pegar unas nuevas.",
+                   "/#cookies")
+        if ok and prev is False:
+            notify("✅ YouTube funciona otra vez", "El servidor ya puede grabar el directo.", "/#cookies")
+    finally:
+        yt_health["busy"] = False
+
+
+def cookie_watch_loop():
+    time.sleep(90)
+    while True:
+        try:
+            run_health_check()
+        except Exception:  # noqa: BLE001
+            yt_health["busy"] = False
+        time.sleep(max(10, COOKIE_CHECK_MIN) * 60)
+
+
+threading.Thread(target=cookie_watch_loop, daemon=True).start()
+
+
+@app.post("/api/yt-test")
+def api_yt_test():
+    """Prueba si el servidor puede leer el video de YouTube con las cookies actuales."""
+    url = ((request.get_json(silent=True) or {}).get("url") or health_url() or "").strip()
+    if not url:
+        return jsonify(error="Pega primero el link del directo"), 400
+    ok, msg = yt_probe(url)
+    yt_health.update(ok=ok, msg=msg, checked=time.time())
+    return jsonify(ok=ok, message=msg)
 
 
 @app.delete("/api/cookies")
@@ -555,6 +611,7 @@ class Recorder:
                 yt_state["client"] = client  # ese cliente sí funcionó
             fails = fails + 1 if time.time() - t0 < 30 else 0
             if fails >= 4:
+                threading.Thread(target=run_health_check, daemon=True).start()
                 self.error = ("No se pudo grabar el directo.\n" + diagnose(self.url) +
                               "\n\nÚltimas líneas de buffer/grabadora.log:\n" + self.tail_log(4))
                 self.running = False
@@ -673,6 +730,159 @@ def link_or_copy(src, dst):
 
 
 rec = Recorder()
+
+
+# =========================== chat del directo de YouTube: mensajes por minuto
+CHAT_DIR = DATA / "chat"
+CHAT_RENDERERS = {"liveChatTextMessageRenderer": 1, "liveChatPaidMessageRenderer": 3,
+                  "liveChatPaidStickerRenderer": 3, "liveChatMembershipItemRenderer": 2}
+
+
+class ChatWatcher:
+    """Descarga el chat del directo con yt-dlp y cuenta mensajes cada 5 segundos (hora real)."""
+
+    def __init__(self):
+        self.proc = None
+        self.running = False
+        self.counts = {}       # cubeta de 5 s -> mensajes (los pagados cuentan más)
+        self.state = "apagado"
+        self.total = 0
+        self.lock = threading.Lock()
+
+    def start(self, url):
+        self.stop()
+        with self.lock:
+            self.counts, self.total = {}, 0
+        if "youtube.com" not in url and "youtu.be" not in url:
+            self.state = "solo funciona con directos de YouTube"
+            return
+        shutil.rmtree(CHAT_DIR, ignore_errors=True)
+        CHAT_DIR.mkdir(parents=True, exist_ok=True)
+        self.running = True
+        self.state = "conectando…"
+        threading.Thread(target=self._run, args=(url,), daemon=True).start()
+
+    def follow_file(self, path):
+        """Para pruebas: sigue un archivo de chat ya existente."""
+        self.stop()
+        self.running = True
+        self.state = "leyendo"
+        threading.Thread(target=self._tail, args=([Path(path)],), daemon=True).start()
+
+    def stop(self):
+        self.running = False
+        if self.proc:
+            try:
+                self.proc.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+            self.proc = None
+        if self.state not in ("solo funciona con directos de YouTube",):
+            self.state = "apagado"
+
+    def _run(self, url):
+        log = open(CHAT_DIR / "chat.log", "a", encoding="utf-8", errors="replace")
+        self.proc = subprocess.Popen(ytdlp() + ["--skip-download", "--write-subs", "--sub-langs", "live_chat",
+                                                "--no-warnings", "-o", str(CHAT_DIR / "chat.%(ext)s"), url],
+                                     stdout=log, stderr=log)
+        tail = threading.Thread(target=self._tail, args=(None,), daemon=True)
+        tail.start()
+        self.proc.wait()
+        if self.running and self.total == 0:
+            self.state = "chat no disponible en este directo"
+
+    def _tail(self, files):
+        offsets, partial = {}, {}
+        while self.running:
+            paths = files or sorted(CHAT_DIR.glob("chat*.live_chat.json*"))
+            for f in paths:
+                try:
+                    size = f.stat().st_size
+                except OSError:
+                    continue
+                off = offsets.get(f, 0)
+                if size <= off:
+                    continue
+                with open(f, "rb") as fh:
+                    fh.seek(off)
+                    data = fh.read()
+                offsets[f] = off + len(data)
+                text = partial.get(f, "") + data.decode("utf-8", errors="replace")
+                lines = text.split("\n")
+                partial[f] = lines.pop()
+                for ln in lines:
+                    self._parse(ln)
+            time.sleep(1)
+
+    def _parse(self, line):
+        line = line.strip()
+        if not line:
+            return
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            return
+        stack, found = [obj], []
+        while stack:
+            o = stack.pop()
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    if k in CHAT_RENDERERS and isinstance(v, dict) and v.get("timestampUsec"):
+                        found.append((int(v["timestampUsec"]) / 1e6, CHAT_RENDERERS[k]))
+                    elif isinstance(v, (dict, list)):
+                        stack.append(v)
+            elif isinstance(o, list):
+                stack.extend(o)
+        if found:
+            with self.lock:
+                for ts, w in found:
+                    b = int(ts // 5)
+                    self.counts[b] = self.counts.get(b, 0) + w
+                    self.total += 1
+                old = int(time.time() // 5) - 3 * 720  # se guardan 3 horas
+                for b in [b for b in self.counts if b < old]:
+                    del self.counts[b]
+            self.state = "en vivo"
+
+    # ---- lecturas
+    def has_data(self):
+        return self.total > 20
+
+    def rate(self, t0, t1):
+        """Mensajes por minuto entre dos horas reales."""
+        with self.lock:
+            n = sum(c for b, c in self.counts.items() if t0 <= b * 5 < t1)
+        return n * 60 / max(5, t1 - t0)
+
+    def baseline(self, t0, t1):
+        """Ritmo normal del chat (mediana por tramos de 30 s)."""
+        rates = [self.rate(t, t + 30) for t in range(int(t0), int(t1), 30)]
+        rates = sorted(r for r in rates) or [0]
+        return max(5.0, rates[len(rates) // 2])
+
+    def peaks(self, t0, t1, factor=2.5):
+        """Horas donde el chat se dispara (por encima de `factor` veces lo normal)."""
+        base = self.baseline(t0, t1)
+        out = []
+        t = int(t0)
+        while t < t1:
+            if self.rate(t, t + 5) >= base * factor:  # arranque exacto de la explosión (cubetas de 5 s)
+                start = t
+                peak = 0.0
+                while t < t1 and self.rate(t, t + 5) >= base * factor * 0.6:
+                    peak = max(peak, self.rate(t, t + 5) / base)
+                    t += 5
+                if not out or start - out[-1][0] > 30:
+                    out.append((start, peak))
+            t += 5
+        return out, base
+
+    def summary(self):
+        now = time.time()
+        return {"state": self.state, "per_min": round(self.rate(now - 75, now - 15)), "total": self.total}
+
+
+chat = ChatWatcher()
 
 
 def clip_files(cid):
@@ -845,6 +1055,8 @@ def detect_moments(jid, d):
     lv = moments.loudness_curve(src_args)
     found = moments.find_moments(lv, top=top, before=before, after=after, total=total - w0,
                                  min_gap=max(12.0, before), min_score=float(d.get("min_score", 3.0)))
+    if chat.has_data():
+        found = chat_boost(found, rows, work, w0, total, before, after, top)
     for m in found:
         absolute = w0 + m["t"]
         row = next((r for r in rows if r[2] <= absolute < r[2] + r[3]), rows[-1])
@@ -855,6 +1067,55 @@ def detect_moments(jid, d):
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return found, f"últimos {int(minutes)} min"
+
+
+def chat_boost(found, rows, work, w0, total, before, after, top):
+    """Sube los momentos donde el chat se disparó y agrega momentos que solo se ven en el chat."""
+    import math
+    spans = []  # (inicio en el buffer, duración, hora real del final)
+    for r in rows:
+        try:
+            spans.append((r[2], r[3], (work / r[1].name).stat().st_mtime))
+        except OSError:
+            pass
+    if not spans:
+        return found
+
+    def wall_of(abs_t):
+        for st, du, end in spans:
+            if st <= abs_t <= st + du:
+                return end - (st + du - abs_t)
+        st, du, end = spans[-1]
+        return end - (st + du - abs_t)
+
+    def abs_of(wall):
+        for st, du, end in spans:
+            if end - du <= wall <= end:
+                return st + du - (end - wall)
+        return None
+
+    w_start, w_end = wall_of(w0), wall_of(total)
+    peaks, _ = chat.peaks(w_start, w_end)
+    for wall, ratio in peaks:
+        a = abs_of(wall - 4)  # lo que pasó unos segundos antes de que el chat explotara
+        if a is None:
+            continue
+        e = a - w0
+        boost = round(min(15.0, 6 * math.log2(max(ratio, 1.01))), 1)
+        covering = [m for m in found if m["start"] <= e <= m["end"]]
+        if covering:  # una toma ya incluye ese segundo: se le sube el puntaje
+            m = min(covering, key=lambda m: abs(m["t"] - e))
+            m["score"] = round(m["score"] + boost, 1)
+            m["chat"] = round(max(ratio, m.get("chat", 0)), 1)
+        else:  # momento que solo se ve en el chat
+            found.append({"t": round(e, 1), "start": round(max(0.0, e - before), 1),
+                          "end": round(min(total - w0, e + after), 1),
+                          "score": round(3 + boost, 1), "chat": round(ratio, 1), "stars": 1})
+    found = sorted(found, key=lambda m: m["score"], reverse=True)[:max(top, 1)]
+    best = max(m["score"] for m in found) or 1
+    for m in found:
+        m["stars"] = 3 if m["score"] >= best * 0.8 else 2 if m["score"] >= best * 0.5 else 1
+    return found
 
 
 def job_moments(jid, d):
@@ -1182,7 +1443,15 @@ def job_render(jid, opts):
     if fmt == "horizontal":
         base = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
                 f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1[v0]")
-    elif mode == "fill":
+    elif mode == "smart" and smartcrop.available():  # encuadre inteligente: sigue las caras
+        update_job(jid, label=(opts.get("_label") or "Clip") + " · 🎯 buscando caras…")
+        try:
+            sc = smartcrop.smart_crop_filter(src, t_in, dur, W, H, zoom)
+        except Exception:  # noqa: BLE001
+            sc = None
+        base = sc[0] if sc else (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
+                                 f"crop={W}:{H},setsar=1[v0]")
+    elif mode in ("fill", "smart"):
         base = (f"[0:v]scale={W}*{zoom}:{H}*{zoom}:force_original_aspect_ratio=increase,"
                 f"crop={W}:{H}:(iw-{W})*{pos}:(ih-{H})/2,setsar=1[v0]")
     else:
@@ -1572,7 +1841,7 @@ def preview_vf(fmt, mode, W, H):
     blur = max(2, int(25 * W / 1080))
     if fmt == "horizontal":
         return f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2"
-    if mode == "fill":
+    if mode in ("fill", "smart"):
         return f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
     return (f"split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
             f"boxblur={blur}:3,eq=brightness=-0.08[bg];[b]scale={W}:-2[fg];[bg][fg]overlay=0:(H-h)/2")
@@ -1718,12 +1987,16 @@ def api_start():
     if not url:
         return jsonify(error="Pega el link del directo"), 400
     rec.start(url)
+    if url.startswith("http"):
+        LAST_URL.write_text(url, encoding="utf-8")
+    chat.start(url)
     return jsonify(ok=True)
 
 
 @app.post("/api/buffer/stop")
 def api_stop():
     rec.stop()
+    chat.stop()
     return jsonify(ok=True)
 
 
@@ -2656,6 +2929,8 @@ def api_status():
         public_base=public_base(), render_workers=RENDER_WORKERS, ai=ai_available(),
         pilot={"cfg": pilot_cfg(), "state": pilot_state}, push=push_available(), push_count=len(push_subs()),
         queue_pending=sum(1 for i in queue_load() if i["status"] == "pendiente"), smart=_has_whisper(),
+        chat=chat.summary(), yt_health={k: yt_health[k] for k in ("ok", "checked", "msg")},
+        smartcrop=smartcrop.available(),
         disk={"clips_mb": folder_mb(CLIPS), "buffer_mb": folder_mb(BUF),
               "free_gb": round(shutil.disk_usage(DATA).free / 1e9, 1)},
         js_runtime=bool(shutil.which("deno") or any(shutil.which(r) for r in ("node", "bun", "quickjs"))))

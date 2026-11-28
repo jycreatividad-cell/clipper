@@ -265,6 +265,7 @@
       <button id="btnStop">■ Detener</button>
     </div>
     <p class="mut" id="recState" style="margin:10px 0 0"><span class="dot"></span>Sin grabar</p>
+    <p class="mut" id="chatState" style="margin:2px 0 0"></p>
     <div class="bar"><i id="bufBar"></i></div>
     <div id="recErr" class="err hidden"></div>
     <details style="margin-top:10px" id="ckBox">
@@ -299,6 +300,7 @@
         <button id="ckDel" style="flex:0 0 auto">Quitar</button>
       </div>
       <div id="ckMsg" class="mut" style="margin-top:8px;white-space:pre-wrap"></div>
+      <p class="mut" id="ckHealth" style="margin:6px 0 0"></p>
     </details>
     <div class="player" id="player" style="margin-top:12px">El directo aparecerá aquí</div>
   </div>
@@ -462,6 +464,7 @@
           <div class="seg" style="margin-top:8px">
             <label><input type="radio" name="mode" value="blur" checked><span>Fondo borroso</span></label>
             <label><input type="radio" name="mode" value="fill"><span>Pantalla completa</span></label>
+            <label><input type="radio" name="mode" value="smart"><span>🎯 Sigue caras</span></label>
           </div>
           <label class="f">Mover el encuadre: <span id="posV">centro</span></label>
           <input type="range" id="pos" min="0" max="100" value="50">
@@ -1081,7 +1084,7 @@ function updSummaries() {
   const all = [...(styleData.templates || []), ...(styleData.simple || []), ...(styleData.forms || [])];
   const st = all.find(x => x.id === hookStyle);
   $('#sumStyle').textContent = st ? '· ' + st.name : '';
-  $('#sumFmt').textContent = '· ' + ({vertical: '9:16', cuadrado: '1:1', horizontal: '16:9'}[radio('fmt')]) + (radio('fmt') !== 'horizontal' ? (radio('mode') === 'fill' ? ' completa' : ' borroso') : '');
+  $('#sumFmt').textContent = '· ' + ({vertical: '9:16', cuadrado: '1:1', horizontal: '16:9'}[radio('fmt')]) + (radio('fmt') !== 'horizontal' ? ({fill: ' completa', smart: ' 🎯 sigue caras'}[radio('mode')] || ' borroso') : '');
   $('#sumWm').textContent = '· ' + ([$('#wm').value.trim(), $('#logoOn').checked ? 'logo' : ''].filter(Boolean).join(' + ') || 'ninguna') + (radio('wmmode') === 'movil' && $('#wm').value.trim() ? ' 🛡️' : '');
   $('#sumSubs').textContent = $('#subs').checked ? '· ' + radio('substyle') : '· apagados';
   $('#sumCover').textContent = $('#coverOn').checked ? '· al inicio' : '· no';
@@ -1346,7 +1349,7 @@ function momentItems() {
     item: {kind: 'anchor', seg: m.seg, off: m.off, before, after, label: m.label}}));
   const dt = detected.map((m, i) => ({key: 'd' + i + '_' + (m.seg || m.clip_id) + '_' + m.t, label:
     (m.kind === 'anchor' ? 'Toma · hace ' + fmtLong(m.ago) : 'Toma · ' + fmt(m.start) + '–' + fmt(m.end)),
-    sub: '🔥'.repeat(m.stars) + ' intensidad ' + m.score, stars: m.stars,
+    sub: '🔥'.repeat(m.stars) + ' intensidad ' + m.score + (m.chat ? ` · 💬 chat x${m.chat}` : ''), stars: m.stars,
     item: m.kind === 'anchor' ? {kind: 'anchor', seg: m.seg, off: m.off, before: m.before, after: m.after, label: 'Toma hace ' + fmtLong(m.ago), score: m.score}
                               : {kind: 'capture', clip_id: m.clip_id, in: m.start, out: m.end, label: 'Toma ' + fmt(m.start), score: m.score}}));
   return [...mk, ...dt];
@@ -1613,7 +1616,9 @@ function goTab(t) {
 let newClips = 0, ckOpened = false;
 document.querySelectorAll('.tabbar button').forEach(b => b.onclick = () => goTab(b.dataset.go));
 try { goTab(location.hash === '#clips' ? 'clips' : (localStorage.getItem('tab') || 'directo')); } catch (e) { goTab('directo'); }
-window.addEventListener('hashchange', () => { if (location.hash === '#clips') goTab('clips'); });
+function openCookies() { goTab('directo'); $('#ckBox').open = true; setTimeout(() => $('#ckBox').scrollIntoView({behavior: 'smooth', block: 'start'}), 200); }
+window.addEventListener('hashchange', () => { if (location.hash === '#clips') goTab('clips'); if (location.hash === '#cookies') openCookies(); });
+if (location.hash === '#cookies') setTimeout(openCookies, 600);
 $('#fabMark').onclick = () => { if (navigator.vibrate) navigator.vibrate(30); markNow(); flash('#fabMark', '✅'); };
 const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1693,6 +1698,11 @@ async function refresh() {
     $('#player').innerHTML = `<iframe src="https://www.youtube.com/embed/${r.video_id}?autoplay=1&mute=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
   }
   $('#ckState').textContent = state.cookies ? '✅ cargadas' : '(no cargadas)';
+  const yh = state.yt_health || {};
+  $('#ckHealth').textContent = yh.checked ? `🔎 Revisión automática cada hora · última hace ${fmtLong(Math.max(0, Date.now() / 1000 - yh.checked))}: ${yh.ok ? '✅ YouTube responde' : '⚠️ ' + (yh.msg || '').split('\n').slice(-1)[0]}` : '🔎 Revisión automática cada hora (te aviso al iPhone si YouTube bloquea).';
+  if (yh.ok === false && !ckOpened) { ckOpened = true; $('#ckBox').open = true; }
+  const ch = state.chat || {};
+  $('#chatState').textContent = r.running ? (ch.state === 'en vivo' ? `💬 Chat en vivo: ${ch.per_min} mensajes/min · se usa para encontrar momentos` : `💬 Chat: ${ch.state || 'apagado'}`) : '';
   $('#logoPv').classList.toggle('hidden', !state.logo);
   if (state.logo && !$('#logoPv').src) $('#logoPv').src = '/api/logo.png?t=' + Date.now();
   if (!state.logo) $('#logoPv').removeAttribute('src');
